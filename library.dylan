@@ -3,6 +3,7 @@ Module: dylan-user
 define library sat
   use collections;
   use common-dylan;
+  use dylan;
   use io;
   use strings;
   use system, import: { file-system };
@@ -31,8 +32,10 @@ define module sat
   use file-system, import: { with-open-file };
   use format;
   use format-out;
+  use standard-io;
   use print;
   use sat-parser;
   use streams;
   use strings;
+  use threads;
 end module sat;
