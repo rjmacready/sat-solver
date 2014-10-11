@@ -12,7 +12,8 @@ You can download .cnf files from here http://www.cs.ubc.ca/~hoos/SATLIB/benchm.h
 
 ## TODO
 
-Abstract further (?...), implement iterative version
+* Read the minisat paper, the interface is not great...
+* Are there coroutines? Try to find a way to milk all possible solutions, right know we only get the first one
 
 ### CNF 
 
