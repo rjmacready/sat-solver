@@ -18,6 +18,12 @@ define class <sat-solver> (<object>)
   slot clauses :: <stretchy-vector> = make(<stretchy-vector>);
 end class;
 
+define class <sat-solver-it> (<sat-solver>)
+end class;
+
+define class <sat-solver-rec> (<sat-solver>)
+end class;
+
 define generic add-clause (s :: <sat-solver>, c :: <object>) => ();
 
 define method add-clause (s :: <sat-solver>, cnf :: <stretchy-vector>) => ();
@@ -64,9 +70,124 @@ define method add-clause (s :: <sat-solver>, c :: <string>) => ();
   add!(s.clauses, c);
 end method;
 
-define generic solve (s :: <sat-solver>);
+define generic solve (s :: <sat-solver>) => ();
+define generic update-watchlist (s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (result :: <boolean>);
+define generic solve-impl (s :: <sat-solver>, watchlist :: <array>) => (fail-or-result :: false-or(<table>));
 
-define method solve (o :: <sat-solver>);
+define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>);
+  block (main-ret)
+    block (get-out)
+      while (size(watchlist[false_literal]) > 0)
+	let clause :: <clause> = watchlist[false_literal][0];
+	let found-alternative :: <boolean> = #f;
+	
+	for (var in clause.vars)
+	  // this is akin to var / 2, gets the variable
+	  let var-root = ash(var, -1); 
+	  // this checks if var is negated
+	  let is-negated = logand(var, 1); 
+	  let has-assignment = element(assignments, var-root, default: #"none");
+	  if (has-assignment = #"none" | has-assignment = logxor(is-negated, 1))
+	    found-alternative := #t;
+	    
+	    pop(watchlist[false_literal]);
+	    push(watchlist[var], clause);
+	    
+	    get-out();
+	  end if;
+	end for;
+	
+	if (~found-alternative)
+	  main-ret(#f);
+	end if;
+      end while;
+    end block;
+    main-ret(#t);
+  end block
+end method;
+
+define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or(<table>));
+  let var-count :: <integer> = o.var-index;
+  local method solve-impl-rec (watchlist, assignment :: <table>, d :: <integer>)
+	  block (solve-ret)
+	    if (d = var-count)
+	      solve-ret(assignment);
+	    else
+	      for(a :: <integer> in list(0, 1))
+		assignment[d] := a;
+		//let ashed :: <integer> = ash(d, 1);
+		let false_literal = logior(ash(d, 1), a);
+		if (update-watchlist(o, watchlist, false_literal, assignment))
+		  //for (a in solve-impl-rec(assignment, d + 1))
+		  let a = solve-impl-rec(watchlist, assignment, d + 1);
+		  if (a)
+		    solve-ret(a);
+		  end if;
+		  //end for;
+		end if;
+	      end for;
+	      remove-key!(assignment, d);
+	    end if;
+	    solve-ret(#f);
+	  end block
+	end method;
+  
+  solve-impl-rec (w, make(<table>), 0)
+end method;
+
+define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(<table>));
+  let var-count :: <integer> = o.var-index;
+  
+  local method solve-impl-iterative (watchlist, assignment :: <table>, d :: <integer>)
+	  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0);
+	  let tried-something :: <boolean> = #f;
+	  
+	  block (solve-ret)
+	    while (#t)
+	      //format-out("d:%s %= \n", d, state); force-out();
+	      
+	      if (d = var-count)
+		solve-ret(assignment);
+		d := d - 1;
+		// can continue though
+	      end if;
+	      
+	      tried-something := #f;
+	      block (try-block)
+		for (a :: <integer> in list(0, 1))
+		  if (logand(ash(state[d], -a), 1) = 0) // (state[d] >> 1) & 1 == 0
+		    tried-something := #t;
+		    state[d] := logior(state[d], ash(1, a)); // state[d] |= (1 << a)
+		    assignment[d] := a;
+		    if (~update-watchlist(o, watchlist, logior(ash(d, 1), a), assignment))
+		      remove-key!(assignment, d);
+		    else
+		      d := d + 1;
+		      try-block();
+		    end;		    
+		  end;
+		end;
+	      end;
+
+	      if (~tried-something)
+		if (d = 0)
+		  solve-ret(#f);
+		  // no more solutions
+		else
+		  // backtrack
+		  state[d] := 0;
+		  remove-key!(assignment, d);
+		  d := d - 1;
+		end;
+	      end;
+	    end;
+	  end
+	end method;
+
+  solve-impl-iterative(w, make(<table>), 0);
+end method;
+
+define method solve (o :: <sat-solver>) => ();
   let watchlist = make(<array>, dimensions: list(o.var-index * 2));
   local method setup-watchlist()
 	  let i = 0;
@@ -80,6 +201,7 @@ define method solve (o :: <sat-solver>);
 	  end for;  
 	end method;
   
+  /*
   local method update-watchlist(watchlist, false_literal, assignments :: <table>)
 	  block (main-ret)
 	    block (get-out)
@@ -160,7 +282,7 @@ define method solve (o :: <sat-solver>);
 	  end
 	end method;
 
-  local method solve-impl
+  local method solve-impl-rec
  (watchlist, assignment :: <table>, d :: <integer>)
 	  block (solve-ret)
 	    if (d = var-count)
@@ -185,8 +307,9 @@ define method solve (o :: <sat-solver>);
 	  end block
 	end method;
 
+  */
   setup-watchlist();
-  let r = solve-impl-iterative(watchlist, make(<table>), 0);
+  let r = solve-impl(o, watchlist);
   format-out("result = \n"); 
   format-out("%s\n", print-assignments(o, r)); force-out();
   format-out("solved\n"); force-out();

@@ -14,25 +14,32 @@ define function main
   exit-application(0);
   */
   // for(file in arguments)
-  let file = arguments[0];
-  let out-file = arguments[1];
+  let mode = arguments[0];
+  let file = arguments[1];
+  let out-file = arguments[2];
   
   with-open-file(stream = file, direction: #"input")
     with-open-file(out-stream = out-file, direction: #"output")
       dynamic-bind(*standard-output* = out-stream)
-	let s = make(<sat-solver>);
-      let x = make(<parser>);
-      x.info-callback := method (n-vars, n-clauses)
-			   s.var-index := n-vars;
-			 end method;
-      
-      x.clause-callback := method (tokens)
-			     add-clause(s, tokens);
+	//begin
+	  let s = if (mode = "it")
+		    make(<sat-solver-it>);
+		  else
+		    make(<sat-solver-rec>);  
+		  end;
+	  //let s = make(<sat-solver>);
+	  let x = make(<parser>);
+	  x.info-callback := method (n-vars, n-clauses)
+			       s.var-index := n-vars;
+			     end method;
+	  
+	  x.clause-callback := method (tokens)
+				 add-clause(s, tokens);
 			   end method;
-      
-      parse-stream(x, stream);
-      solve(s);
-      end;
+	  
+	  parse-stream(x, stream);
+	  solve(s);
+	end;
     end;
   end with-open-file;  
     //end for;

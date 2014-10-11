@@ -3,4 +3,7 @@
 *.cnf
 *.hdp
 *.out
+*.out.it
+*.out.rec
+*.time
 _build
