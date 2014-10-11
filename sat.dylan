@@ -19,7 +19,8 @@ define function main
   
   with-open-file(stream = file, direction: #"input")
     with-open-file(out-stream = out-file, direction: #"output")
-      let s = make(<sat-solver>);
+      dynamic-bind(*standard-output* = out-stream)
+	let s = make(<sat-solver>);
       let x = make(<parser>);
       x.info-callback := method (n-vars, n-clauses)
 			   s.var-index := n-vars;
@@ -31,6 +32,7 @@ define function main
       
       parse-stream(x, stream);
       solve(s);
+      end;
     end;
   end with-open-file;  
     //end for;

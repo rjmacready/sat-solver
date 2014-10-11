@@ -160,7 +160,8 @@ define method solve (o :: <sat-solver>);
 	  end
 	end method;
 
-  local method solve-impl (watchlist, assignment :: <table>, d :: <integer>)
+  local method solve-impl
+ (watchlist, assignment :: <table>, d :: <integer>)
 	  block (solve-ret)
 	    if (d = var-count)
 	      solve-ret(assignment);
