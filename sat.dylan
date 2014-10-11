@@ -15,8 +15,10 @@ define function main
   */
   // for(file in arguments)
   let file = arguments[0];
+  let out-file = arguments[1];
   
-    with-open-file(stream = file, direction: #"input")
+  with-open-file(stream = file, direction: #"input")
+    with-open-file(out-stream = out-file, direction: #"output")
       let s = make(<sat-solver>);
       let x = make(<parser>);
       x.info-callback := method (n-vars, n-clauses)
@@ -29,10 +31,11 @@ define function main
       
       parse-stream(x, stream);
       solve(s);
-    end with-open-file;  
-  //end for;
+    end;
+  end with-open-file;  
+    //end for;
 
-  exit-application(0);
+    exit-application(0);
 end function main;
 
 main(application-name(), application-arguments());
