@@ -17,8 +17,6 @@ define generic parse-read (parser :: <parser>, c :: <character>, s :: <stream>) 
 define generic parse-read-clauses(parser :: <parser>, format :: <symbol>, s :: <stream>, n-vars :: <integer>, n-cli :: <integer>) => ();
 
 define method parse-stream (parser :: <parser>, s :: <stream>) => ();
-  //let x = read-element(s);
-  // format-out("%s\n", x);
   parse-read(parser, read-element(s), s);
 end method;
 
@@ -26,7 +24,6 @@ define method parse-read (parser :: <parser>, c == 'c', s :: <stream>) => ();
   if (~stream-at-end?(s))
     // read rest of the line as a comment
     let comment = read-line(s);
-    //format-out("comment: %s\n", comment);
     
     if (parser.comment-callback)
       parser.comment-callback(comment);
@@ -42,13 +39,7 @@ define method parse-read (parser :: <parser>, c == 'p', s :: <stream>) => ();
     
     // read rest of the line as info
     let info = read-line(s);
-    // format-out("info: %s\n", info);
-    
-    // eat whitespace, read format
-    // eat whitespace, read number (n vars)
-    // eat whitespace, read number (n clauses)
     let tokens = split(info, ' ', remove-if-empty?: #t); 
-    //format-out("%=\n", tokens); force-out();
 
     let n-vars :: <integer> = string-to-integer(tokens[1]);
     let n-cl :: <integer> = string-to-integer(tokens[2]);
