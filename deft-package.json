@@ -1,0 +1,11 @@
+{
+  "name": "sat",
+  "description": "A tiny SAT solver.",
+  "keywords": [
+    "logic"
+  ],
+  "tests": ["sat-test-suite-app"],
+  "license": "MIT",
+  "default-target": "sat",
+  "registries": []
+}

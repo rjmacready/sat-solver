@@ -7,24 +7,9 @@ define library sat
   use io;
   use strings;
   use system, import: { file-system };
-end library sat;
-
-define module sat-parser
-  use collections;
-  use common-dylan;
-  use streams;
-  use strings;
   
-  export 
-    <parser>,
-    parse-stream,
-    comment-callback,
-    comment-callback-setter,
-    info-callback,
-    info-callback-setter,
-    clause-callback,
-    clause-callback-setter;
-end module;
+  use sat-core;
+end library sat;
 
 define module sat
   use collections;
@@ -34,8 +19,10 @@ define module sat
   use format-out;
   use standard-io;
   use print;
-  use sat-parser;
   use streams;
   use strings;
   use threads;
+
+  use sat-parser;
+  use sat-core;
 end module sat;

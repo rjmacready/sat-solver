@@ -1,4 +1,4 @@
-Module: sat
+Module: sat-core
 Synopsis: 
 Author: 
 Copyright: 

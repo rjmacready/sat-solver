@@ -1,4 +1,5 @@
-SRC=uf20-91 UUF50.218.1000 uf50-218
+SRC=uf20-91
+# UUF50.218.1000 uf50-218
 OUT=bin
 
 FILES0=$(foreach dir,$(SRC),$(wildcard $(dir)/*.cnf))
