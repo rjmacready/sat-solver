@@ -1,4 +1,4 @@
-Module: sat-parser
+Module: sat-core
 Synopsis: 
 Author: 
 Copyright: 
@@ -16,8 +16,35 @@ define generic parse-stream (parser :: <parser>, s :: <stream>) => ();
 define generic parse-read (parser :: <parser>, c :: <character>, s :: <stream>) => ();
 define generic parse-read-clauses(parser :: <parser>, format :: <symbol>, s :: <stream>, n-vars :: <integer>, n-cli :: <integer>) => ();
 
-define method parse-stream (parser :: <parser>, s :: <stream>) => ();
-  parse-read(parser, read-element(s), s);
+define method parse-read-clauses (parser :: <parser>, format == #"cnf", s :: <stream>, 
+				  n-vars :: <integer>, n-cl == 0) => ()
+  // do nothing
+end method;
+
+define method parse-read-clauses (parser :: <parser>, format == #"cnf", s :: <stream>, 
+				  n-vars :: <integer>, n-cl :: <integer>) => ();
+  if (~stream-at-end?(s))
+    let line = read-line(s);
+    let tokens = split(line, ' ', remove-if-empty?: #t);
+    let vars = make(<stretchy-vector>);
+    
+    block (quit)
+      for (token in tokens)
+	let v = string-to-integer(token);
+	if (v = 0)
+	  quit();
+	end if;
+	
+	add!(vars, v);
+      end for;
+    end block;
+        
+    if (parser.clause-callback)
+      parser.clause-callback(vars);
+    end if;
+    
+    parse-read-clauses(parser, format, s, n-vars, n-cl - 1);
+  end if;
 end method;
 
 define method parse-read (parser :: <parser>, c == 'c', s :: <stream>) => ();
@@ -57,33 +84,21 @@ define method parse-read (parser :: <parser>, c == 'p', s :: <stream>) => ();
   end if;
 end method;
 
-define method parse-read-clauses (parser :: <parser>, format == #"cnf", s :: <stream>, 
-				  n-vars :: <integer>, n-cl == 0) => ()
-  // do nothing
+define method parse-stream (parser :: <parser>, s :: <stream>) => ();
+  parse-read(parser, read-element(s), s);
 end method;
 
-define method parse-read-clauses (parser :: <parser>, format == #"cnf", s :: <stream>, 
-				  n-vars :: <integer>, n-cl :: <integer>) => ();
-  if (~stream-at-end?(s))
-    let line = read-line(s);
-    let tokens = split(line, ' ', remove-if-empty?: #t);
-    let vars = make(<stretchy-vector>);
-    
-    block (quit)
-      for (token in tokens)
-	let v = string-to-integer(token);
-	if (v = 0)
-	  quit();
-	end if;
-	
-	add!(vars, v);
-      end for;
-    end block;
-        
-    if (parser.clause-callback)
-      parser.clause-callback(vars);
-    end if;
-    
-    parse-read-clauses(parser, format, s, n-vars, n-cl - 1);
-  end if;
-end method;
+define function parse-cnf-stream! (s :: <stream>, o :: <sat-solver>) => (o :: <sat-solver>)
+  let p = make(<parser>);
+  p.info-callback := method (n-vars, n-clauses)
+		       o.var-index := n-vars;
+		     end method;
+	  
+  p.clause-callback := method (tokens)
+			 add-clause(o, tokens);
+		       end method;
+	  
+  parse-stream(p, s);
+  
+  o
+end function;

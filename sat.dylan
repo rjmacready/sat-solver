@@ -5,14 +5,7 @@ Copyright:
 
 define function main
     (name :: <string>, arguments :: <vector>)
-/* 
-  let s = make(<sat-solver>);
-  add-clause(s, "~A");
-  add-clause(s, "A");
-  format-out("%=\n", s);
-  solve(s);
-  exit-application(0);
-  */
+
   // for(file in arguments)
   let mode = arguments[0];
   let file = arguments[1];
@@ -27,18 +20,14 @@ define function main
 		  else
 		    make(<sat-solver-rec>);  
 		  end;
-	  //let s = make(<sat-solver>);
-	  let x = make(<parser>);
-	  x.info-callback := method (n-vars, n-clauses)
-			       s.var-index := n-vars;
-			     end method;
 	  
-	  x.clause-callback := method (tokens)
-				 add-clause(s, tokens);
-			   end method;
-	  
-	  parse-stream(x, stream);
-	  solve(s);
+	  parse-cnf-stream!(stream, s);
+          let solved = solve(s);
+          if (solved)
+	    print-assignments(s, solved);
+	  else
+	    format-out("#f");
+	  end;
 	end;
     end;
   end with-open-file;  

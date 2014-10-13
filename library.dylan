@@ -23,6 +23,5 @@ define module sat
   use strings;
   use threads;
 
-  use sat-parser;
   use sat-core;
 end module sat;
