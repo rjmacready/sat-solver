@@ -11,7 +11,7 @@ end class;
 
 define class <sat-solver> (<object>)
   /* current free index to assign to a variable */
-  slot var-index :: <integer> = 0;
+  slot var-count :: <integer> = 0;
   /* mapping from variable (A, B, C ...) to a index */
   slot vars :: <table> = make(<table>);
   /* collection of clauses */
@@ -26,14 +26,21 @@ end class;
 
 define generic add-clause (s :: <sat-solver>, c :: <object>) => ();
 
-define method add-clause (s :: <sat-solver>, cnf :: <stretchy-vector>) => ();
+/*
+ * this expects variables to be 1-indexed and the negative of a variable to be -(var-index)
+ * we'll turn this into a form where variables are 0-indexed and literals are given by (var-index * 2); to negate, add 1
+ */
+define method add-clause (s :: <sat-solver>, cnf :: <collection>) => ();
   let c = make(<clause>);
   for(cnf-var in cnf) 
     let i = cnf-var;
+    // force to positive value
     if (i < 0)
       i := i * -1;
     end if;
+    // 0-index
     i := i - 1;
+    // transform into our notation
     i := i * 2;
     if (cnf-var < 0)
       i := i + 1;
@@ -57,8 +64,8 @@ define method add-clause (s :: <sat-solver>, c :: <string>) => ();
       e := element(lex, 0);
     end if;
     if (~element(s.vars, e, default: #f))
-      s.vars[e] := s.var-index;
-      s.var-index := s.var-index + 1;
+      s.vars[e] := s.var-count;
+      s.var-count := s.var-count + 1;
     end if;
     let var-value = s.vars[e] * 2;
     if (is-negative)
@@ -112,7 +119,7 @@ define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_li
 end method;
 
 define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or(<table>));
-  let var-count :: <integer> = o.var-index;
+  let var-count :: <integer> = o.var-count;
   local method solve-impl-rec (watchlist, assignment :: <table>, d :: <integer>)
 	  block (solve-ret)
 	    if (d = var-count)
@@ -142,7 +149,7 @@ define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or
 end method;
 
 define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(<table>));
-  let var-count :: <integer> = o.var-index;
+  let var-count :: <integer> = o.var-count;
   
   local method solve-impl-iterative (watchlist, assignment :: <table>, d :: <integer>)
 	  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0);
@@ -170,10 +177,10 @@ define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(
 		    else
 		      d := d + 1;
 		      try-block();
-		    end;		    
-		  end;
-		end;
-	      end;
+		    end if;		    
+		  end if;
+		end for;
+	      end block;
 
 	      if (~tried-something)
 		if (d = 0)
@@ -184,17 +191,17 @@ define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(
 		  state[d] := 0;
 		  remove-key!(assignment, d);
 		  d := d - 1;
-		end;
-	      end;
-	    end;
-	  end
+		end if;
+	      end if;
+	    end while;
+	  end block
 	end method;
 
   solve-impl-iterative(w, make(<table>), 0);
 end method;
 
 define method solve (o :: <sat-solver>) => (r :: false-or(<table>));
-  let watchlist = make(<array>, dimensions: list(o.var-index * 2));
+  let watchlist = make(<array>, dimensions: list(o.var-count * 2));
   local method setup-watchlist()
 	  let i = 0;
 	  while (i < size(watchlist))

@@ -23,7 +23,7 @@ define method print-assignments (s :: <sat-solver>, o :: false-or(<table>)) => (
   if (o)
     let i = 0;
     format-out("{\n");
-    while (i < s.var-index)
+    while (i < s.var-count)
       format-out(" var %= = %=\n", i, element(o, i, default: #"none"));
       i := i + 1;
     end while;

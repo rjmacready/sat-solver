@@ -91,7 +91,7 @@ end method;
 define function parse-cnf-stream! (s :: <stream>, o :: <sat-solver>) => (o :: <sat-solver>)
   let p = make(<parser>);
   p.info-callback := method (n-vars, n-clauses)
-		       o.var-index := n-vars;
+		       o.var-count := n-vars;
 		     end method;
 	  
   p.clause-callback := method (tokens)

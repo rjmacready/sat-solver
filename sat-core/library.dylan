@@ -35,6 +35,8 @@ define module sat-core
     <sat-solver>,
     <sat-solver-it>,
     <sat-solver-rec>,
+    var-count,
+    var-count-setter,
     add-clause,
     solve;
 end module sat-core;

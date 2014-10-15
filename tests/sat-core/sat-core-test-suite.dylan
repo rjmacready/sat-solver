@@ -46,12 +46,22 @@ define test shift-right-is-ash-minus-one ()
   assert-equal(1, x);
 end test;
 
-define test test-some-test ()
-  assert-true(#t);
+define test simple-sat ()
+  let x = make(<sat-solver-rec>);
+  x.var-count := 2;
+  add-clause(x, list(1));
+  add-clause(x, list(2));
+  
+  assert-not-equal(#f, solve(x))
 end test;
 
-define test test-simple-cnf ()
-  assert-true(#t);
+define test simple-unsat ()
+  let x = make(<sat-solver-rec>);
+  x.var-count := 1;
+  add-clause(x, list(1));
+  add-clause(x, list(-1));
+  
+  assert-equal(#f, solve(x))
 end test;
 
 define suite sat-core-test-suite ()
@@ -59,6 +69,6 @@ define suite sat-core-test-suite ()
   test push-last-puts-on-end;
   test shift-left-is-ash-one;
   test shift-right-is-ash-minus-one;
-  test test-some-test;
-  test test-simple-cnf;
+  test simple-sat;
+  test simple-unsat;
 end suite;
