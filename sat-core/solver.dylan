@@ -76,32 +76,37 @@ define generic solve-impl (s :: <sat-solver>, watchlist :: <array>) => (fail-or-
 
 define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>);
   block (main-ret)
-    block (get-out)
-      while (size(watchlist[false_literal]) > 0)
-	let clause :: <clause> = watchlist[false_literal][0];
-	let found-alternative :: <boolean> = #f;
-	
-	for (var in clause.vars)
+
+    while (size(watchlist[false_literal]) > 0)
+      let clause :: <clause> = watchlist[false_literal][0];
+      let found-alternative :: <boolean> = #f;
+
+      block (get-out)	
+	for (alternative in clause.vars)
 	  // this is akin to var / 2, gets the variable
-	  let var-root = ash(var, -1); 
+	  let var-root = ash(alternative, -1); 
 	  // this checks if var is negated
-	  let is-negated = logand(var, 1); 
+	  let is-negated = logand(alternative, 1); 
 	  let has-assignment = element(assignments, var-root, default: #"none");
 	  if (has-assignment = #"none" | has-assignment = logxor(is-negated, 1))
 	    found-alternative := #t;
 	    
+	    // delete first
 	    pop(watchlist[false_literal]);
-	    push(watchlist[var], clause);
+	    
+	    // append to end
+	    push-last(watchlist[alternative], clause);
 	    
 	    get-out();
 	  end if;
 	end for;
-	
-	if (~found-alternative)
-	  main-ret(#f);
-	end if;
-      end while;
-    end block;
+      end block;
+      
+      if (~found-alternative)
+	main-ret(#f);
+      end if;
+    end while;
+
     main-ret(#t);
   end block
 end method;
@@ -128,6 +133,7 @@ define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or
 	      end for;
 	      remove-key!(assignment, d);
 	    end if;
+	    
 	    solve-ret(#f);
 	  end block
 	end method;
@@ -197,8 +203,8 @@ define method solve (o :: <sat-solver>) => (r :: false-or(<table>));
 	  end while;
 	  
 	  for (clause in o.clauses)
-	    add!(watchlist[clause.vars[0]], clause);
-	  end for;  
+	    push-last(watchlist[clause.vars[0]], clause);
+	  end for;
 	end method;
   
   setup-watchlist();

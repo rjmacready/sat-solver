@@ -3,6 +3,7 @@ author:
 copyright: See LICENSE file in this distribution.
 
 define library sat-core-test-suite
+  use collections;
   use common-dylan;
   use io;
   use sat-core;
@@ -12,6 +13,7 @@ define library sat-core-test-suite
 end library;
 
 define module sat-core-test-suite
+  use collections;
   use common-dylan, exclude: { format-to-string };
   use format;
   use sat-core;
