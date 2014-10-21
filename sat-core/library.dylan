@@ -9,7 +9,8 @@ define library sat-core
   use system, import: { file-system };
 
   export 
-    sat-core;
+    sat-core,
+    sat-core-minisat;
 end library sat-core;
 
 define module sat-core
@@ -40,3 +41,22 @@ define module sat-core
     add-clause,
     solve;
 end module sat-core;
+
+define module sat-core-minisat
+  use collections;
+  use common-dylan;
+  use file-system, import: { with-open-file };
+  use format;
+  use format-out;
+  use standard-io;
+  use print;
+  use streams;
+  use strings;
+  use threads;
+  
+  export 
+    <var>,
+    <lit>, negate, sign;
+  
+end module;
+

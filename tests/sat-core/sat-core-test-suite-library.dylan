@@ -16,7 +16,10 @@ define module sat-core-test-suite
   use collections;
   use common-dylan, exclude: { format-to-string };
   use format;
+
   use sat-core;
+  use sat-core-minisat;
+
   use streams, import: { <buffer> };
   use testworks;
 
