@@ -18,9 +18,6 @@ define class <sat-solver> (<object>)
   slot clauses :: <stretchy-vector> = make(<stretchy-vector>);
 end class;
 
-define class <sat-solver-it> (<sat-solver>)
-end class;
-
 define class <sat-solver-rec> (<sat-solver>)
 end class;
 
@@ -146,58 +143,6 @@ define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or
 	end method;
   
   solve-impl-rec (w, make(<table>), 0)
-end method;
-
-define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(<table>));
-  let var-count :: <integer> = o.var-count;
-  
-  local method solve-impl-iterative (watchlist, assignment :: <table>, d :: <integer>)
-	  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0);
-	  let tried-something :: <boolean> = #f;
-	  
-	  block (solve-ret)
-	    while (#t)
-	      //format-out("d:%s %= \n", d, state); force-out();
-	      
-	      if (d = var-count)
-		solve-ret(assignment);
-		d := d - 1;
-		// can continue though
-	      end if;
-	      
-	      tried-something := #f;
-	      block (try-block)
-		for (a :: <integer> in list(0, 1))
-		  if (logand(ash(state[d], -a), 1) = 0) // (state[d] >> 1) & 1 == 0
-		    tried-something := #t;
-		    state[d] := logior(state[d], ash(1, a)); // state[d] |= (1 << a)
-		    assignment[d] := a;
-		    if (~update-watchlist(o, watchlist, logior(ash(d, 1), a), assignment))
-		      remove-key!(assignment, d);
-		    else
-		      d := d + 1;
-		      try-block();
-		    end if;		    
-		  end if;
-		end for;
-	      end block;
-
-	      if (~tried-something)
-		if (d = 0)
-		  solve-ret(#f);
-		  // no more solutions
-		else
-		  // backtrack
-		  state[d] := 0;
-		  remove-key!(assignment, d);
-		  d := d - 1;
-		end if;
-	      end if;
-	    end while;
-	  end block
-	end method;
-
-  solve-impl-iterative(w, make(<table>), 0);
 end method;
 
 define method solve (o :: <sat-solver>) => (r :: false-or(<table>));
