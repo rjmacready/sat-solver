@@ -51,6 +51,8 @@ define inline function lifted (t) => (type :: <type>)
   type-union(singleton(#"bottom"), t);
 end function;
 
+define constant $rescale-factor :: <double-float> = 1e-50; // 1e-100 seems to be too small ...
+
 define constant $v_int :: <type> = limited(<stretchy-vector>, of: <integer>);
 define constant $v_lit :: <type> = limited(<stretchy-vector>, of: <lit>);
 
@@ -94,7 +96,7 @@ define method v-undo (v :: <var-order>, x :: <var>) => ()
 end method;
 
 // FIXME select is taken
-define method v-select (v :: <var-order>) => ()
+define method v-select (v :: <var-order>) => (v :: <var>)
   // TODO
 end method;
 
@@ -482,3 +484,125 @@ define method cancel-until (s :: <solver>, level :: <integer>) => ();
     cancel(s);
   end;
 end;
+
+define method search (s :: <solver>, 
+		      nof-conflicts :: <integer>,
+		      nof-learnts :: <integer>,
+		      params :: <search-params>) => 
+  (r :: $lbool,
+   model :: false-or(<array>))
+  
+  block(return)
+    let conflict-c :: <integer> = 0;
+    s.var-decay := 1 / params.var-decay;
+    s.cla-decay := 1 / params.cla-decay;
+    
+    let confl = s-propagate(s);
+    if (confl)
+      // conflict
+      conflict-c := conflict-c + 1;
+      
+      if(decision-level(s) = s.root-level)
+	return (#f, #f);
+      end;
+      
+      let (learnt-clause, backtrack-level) = analyze(s, confl);
+      cancel-until(s, if (backtrack-level > root-level)
+			backtrack-level
+		      else
+			root-level
+		      end);
+      
+      record(s, learnt-clause);
+      decay-activities(s);
+      
+    else
+	// no conflict
+
+      if (decision-level(s) == 0)
+	simplify-db(s);
+      end;
+      
+      if (size(learnts) - n-assigns(s) >= nof-learnts)
+	reduce-db(s);
+      end;
+      
+      if(n-assigns(s) = n-vars(s))
+	// model found
+	// FIXME dont cancel, otherwise we might need
+	// to copy s.assigns to return it.
+	// cancel-until(s, root-level);
+	return (#t, s.assigns);
+      else
+	  if (conflict-c >= nof-conflicts)
+	    // force restart
+	    cancel-until(s, s.root-level);
+	    return (#"bottom", #f);
+	  else
+	    // new var decision
+	    let p :: <lit> = make(<lit>, var: v-select(s.order));
+	    assume(s, p);
+	  end;
+      end;
+    end;
+  end;
+end;
+
+define method var-bump-activity (s :: <solver>, x :: <var>) => ();
+  let v = var-index(x);
+  s.activity[v] := s.activity[v] + s.var-inc;
+  
+  if(s.activity[v] > $rescale-factor)
+    var-rescale-activity(s);
+  end;
+  
+  update(s.order, x);
+end;
+
+define method var-decay-activity (s :: <solver>) => ();
+  s.var-inc := s.var-inc * s.var-decay;
+end;
+
+define method var-rescale-activity (s :: <solver>) => ();
+  for(i from 0 below n-vars(s))
+    s.activity[i] := s.activity[i] * $rescale-factor;
+  end;
+  s.var-inc := s.var-inc * $rescale-factor;
+end;
+
+define method cla-bump-activity (s :: <solver>, c :: <clause>) => ();
+  // let v = var-index(x);
+  c.activity := c.activity + s.var-inc;
+  
+  if(c.activity > $rescale-factor)
+    cla-rescale-activity(s, c);
+  end;
+end;
+
+define method cla-decay-activity (s :: <solver>) => ();
+  s.cla-inc := s.cla-inc * s.cla-decay;  
+end;
+
+define method cla-rescale-activity (s :: <solver>, c :: <clause>) => ();
+  for(ca in s.learnts)
+    ca.activity := ca.activity * $rescale-factor;
+  end;
+  s.cla-inc := s.cla-inc * $rescale-factor;  
+end;
+
+define method decay-activity (s :: <solver>) => ();
+  var-decay-activity(s);
+  cla-decay-activity(s);
+end;
+ 
+define method reduce-db (s :: <solver>) => ();
+  sort-on-activity(s, s.learnts);
+  
+  // ---
+  
+end;
+ 
+define method simplify-db (s :: <solver>) => (r :: <boolean>);
+  
+end;
+
