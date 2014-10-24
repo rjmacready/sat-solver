@@ -12,11 +12,23 @@ end class;
 define class <sat-solver-it> (<sat-solver>)
 end class;
 
-// define generic add-clause (s :: <sat-solver>, c :: <object>) => ();
+
+define function lit-to-var (lit :: <integer>) => (var :: <integer>)
+  // this is akin to var / 2, gets the variable
+  ash(lit, -1);
+end;
+
+define function negated? (lit :: <integer>) => (i :: <integer>)
+  // this checks if var is negated
+  logand(lit, 1);
+end;
+
 
 /*
- * this expects variables to be 1-indexed and the negative of a variable to be -(var-index)
- * we'll turn this into a form where variables are 0-indexed and literals are given by (var-index * 2); to negate, add 1
+ * this expects variables to be 1-indexed 
+ * and the negative of a variable to be -(var-index)
+ * we'll turn this into a form where variables are 
+ * 0-indexed and literals are given by (var-index * 2); to negate, add 1
  */
 define method add-clause (s :: <sat-solver-it>, cnf :: <collection>) => ();
   let c = make(<clause-it>);
@@ -38,11 +50,9 @@ define method add-clause (s :: <sat-solver-it>, cnf :: <collection>) => ();
   add!(s.clauses, c);
 end method;
 
-
-
-//define generic solve (s :: <sat-solver>) => (r :: false-or(<table>));
-//define generic update-watchlist (s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (result :: <boolean>);
-//define generic solve-impl (s :: <sat-solver>, watchlist :: <array>) => (fail-or-result :: false-or(<table>));
+define method select-lit (c :: <clause-it>) => (i :: <integer>)
+  c.lits[0]
+end;
 
 define function setup-watchlist(s :: <sat-solver-it>) => (watchlist :: <array>)
   let watchlist = make(<array>, dimensions: list(s.var-count * 2));
@@ -57,16 +67,6 @@ define function setup-watchlist(s :: <sat-solver-it>) => (watchlist :: <array>)
   end for;
 
   watchlist;
-end;
-
-define function lit-to-var (lit :: <integer>) => (var :: <integer>)
-  // this is akin to var / 2, gets the variable
-  ash(lit, -1);
-end;
-
-define function negated? (lit :: <integer>) => (i :: <integer>)
-  // this checks if var is negated
-  logand(lit, 1);
 end;
 
 define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>);
@@ -104,78 +104,79 @@ define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false
   end block
 end method;
 
-define method solve-impl (o :: <sat-solver-it>, w :: <array>) => (r :: false-or(<table>));
-  let var-count :: <integer> = o.var-count;
-  
-  local method solve-impl-iterative (watchlist, assignment :: <table>, d :: <integer>)
-	  /*
-	    This array will track which values for which variables we already tried.
-	    0: nothing has been tried
-	    1: #f
-	    2: #t
-	    3: #f and #t
-	    */
-	  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0);
-	  
-	  let tried-something :: <boolean> = #f;
-	  
-	  block (solve-ret)
-	    while (#t)	      
-	      if (d = var-count)
-		solve-ret(assignment);
-		d := d - 1;
-		// can continue though
-	      end if;
+define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
 
-	      /*
-		try to assign a value; insert heuristics here
-		*/
-	      
-	      tried-something := #f;
-	      block (try-block)
-		for (a :: <integer> in list(0, 1))
-		  
-		  // (state[d] >> a) & 1 == 0
-		  if (logand(ash(state[d], -1 * a), 1) = 0) 
-		    tried-something := #t;
+  /*
+    assignments: our assignments at the moment
+    d: current variable we're working with
+    state: will track which values for which variables we already tried.
+           0: nothing has been tried
+           1: #f
+           2: #t
+           3: #f and #t
+  */
 
-		    // state[d] |= (1 << a)
-		    state[d] := logior(state[d], ash(1, a));
-		    assignment[d] := a;
-		    if (~update-watchlist(o, watchlist, logior(ash(d, 1), a), assignment))
-		      remove-key!(assignment, d);
-		    else
-		      d := d + 1;
-		      try-block();
-		    end if;		    
-		  end if;
-		end for;
-	      end block;
-
-	      if (~tried-something)
-		if (d = 0)
-		  solve-ret(#f);
-		  // no more solutions
-		else
-		  // backtrack, undo state, assignment and variable
-		  state[d] := 0;
-		  remove-key!(assignment, d);
-		  d := d - 1;
-		end if;
-	      end if;
-	    end while;
-	  end block
-	end method;
-
-  solve-impl-iterative(w, make(<table>), 0);
-end method;
-
-define method select-lit (c :: <clause-it>) => (i :: <integer>)
-  c.lits[0]
-end;
-
-define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));  
   let watchlist = setup-watchlist(o);
-  let r = solve-impl(o, watchlist);
-  r
+  let var-count :: <integer> = o.var-count;
+  let assignments :: <table> = make(<table>);
+  let d :: <integer> = 0;
+  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0); 
+  let tried-something :: <boolean> = #f;
+  
+  block (solve-ret)
+    while (#t)	      
+      if (d = var-count)
+	// All variables are assigned
+	// so we will return our assignments
+	// we could continue though ...
+	solve-ret(assignments);
+
+	d := d - 1;
+	// FIXME undo assigment too, right? python doesnt do it
+	
+      end if;
+
+      /*
+	try to assign a value; 
+	TODO insert heuristics here
+	*/
+      
+      tried-something := #f;
+      block (try-block)
+	for (a :: <integer> in list(0, 1))
+	  
+	  // (state[d] >> a) & 1 == 0
+	  if (logand(ash(state[d], -a), 1) = 0) 
+	    tried-something := #t;
+
+	    // state[d] |= (1 << a)
+	    state[d] := logior(state[d], ash(1, a));
+	    assignments[d] := a;
+	    
+	    // this is the value we'll try
+	    let v = logior(ash(d, 1), a);
+	    if (~update-watchlist(o, watchlist, v, assignments))
+	      
+	      remove-key!(assignments, d);
+	    else
+	      d := d + 1;
+	      try-block();
+	    end if;		    
+	  end if;
+	end for;
+      end block;
+
+      if (~tried-something)
+	if (d = 0)
+	  solve-ret(#f);
+	  // no more solutions
+	else
+	  // backtrack, undo state, assignment and variable
+	  state[d] := 0;
+	  remove-key!(assignments, d);
+	  d := d - 1;
+	end if;
+      end if;
+    end while;
+  end block;  
 end;
