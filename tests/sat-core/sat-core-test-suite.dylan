@@ -49,6 +49,8 @@ end test;
 define test simple-sat ()
   let x = make(<sat-solver-rec>);
   x.var-count := 2;
+
+  // x /\ y
   add-clause(x, list(1));
   add-clause(x, list(2));
   
@@ -58,6 +60,8 @@ end test;
 define test simple-unsat ()
   let x = make(<sat-solver-rec>);
   x.var-count := 1;
+  
+  // x /\ ~x
   add-clause(x, list(1));
   add-clause(x, list(-1));
   

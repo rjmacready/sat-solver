@@ -9,10 +9,18 @@ define function main
   // for(file in arguments)
   let mode = arguments[0];
   let file = arguments[1];
-  let out-file = arguments[2];
+  let out-file = element(arguments, 2, default: #f);
   
   with-open-file(stream = file, direction: #"input")
-    with-open-file(out-stream = out-file, direction: #"output")
+    
+    let out-stream = if (out-file)
+		       open-file-stream(out-file, 
+					direction: #"output");
+		     else
+			 *standard-output*
+		     end;
+    
+    // with-open-file(out-stream = out-file, direction: #"output")
       dynamic-bind(*standard-output* = out-stream)
 	//begin
 	  let s = if (mode = "it")
@@ -26,11 +34,15 @@ define function main
           if (solved)
 	    print-assignments(s, solved);
 	  else
-	    format-out("#f");
+	    format-out("#f\n");
 	  end;
 	end;
-    end;
-  end with-open-file;  
+
+  if (out-file)
+    close(out-stream);
+  end;
+    // end;
+  end;  
     //end for;
 
     exit-application(0);
