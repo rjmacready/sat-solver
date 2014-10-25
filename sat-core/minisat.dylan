@@ -3,14 +3,51 @@ Synopsis:
 Author: 
 Copyright: 
 
+define class <minisat-stats> (<sat-stats>)
+  slot backtracks :: <integer> = 0;
+  slot iterations :: <integer> = 0;
+  slot failed-assignments :: <integer> = 0;
+  slot correct-assignments :: <integer> = 0;
+  slot n-tried-something :: <integer> = 0;
+  slot var-stats :: <collection>;
+end;
+
+define method print-object (o :: <minisat-stats>, s :: <stream>) => ()
+  next-method();
+  
+  format(s, " Var Usage:\n");
+  for(var-stat in o.var-stats)
+    format(s, " * %= (u: %=)\n", var-stat.var, var-stat.usage);
+  end;
+  
+  format(s, " backtracks: %=\n", o.backtracks);
+  format(s, " iterations: %=\n", o.iterations);
+  format(s, " failed assigns: %=\n", o.failed-assignments);
+  format(s, " correct assigns: %=\n", o.correct-assignments);
+  format(s, " conflicts?: %=\n", o.n-tried-something);
+end;
+
 /* All by itself a clause doesnt make much sense, as it uses a collection of
 indexes only valid for a certain <sat-solver> */
 define class <clause-it> (<object>)
   slot lits :: <stretchy-vector> = make(<stretchy-vector>);
+  slot sorted-lits :: <collection>;
 end class;
 
 define class <sat-solver-it> (<sat-solver>)
+  slot var-stats :: <array>;
+  slot sorted-var-stats :: <array>;
+  slot sat-stats :: <sat-stats>;
 end class;
+
+define class <var-stat> ()
+  slot var :: <integer>, init-keyword: var:;
+  slot usage :: <integer> = 0;
+end;
+
+define function sort-var-stat (a :: <var-stat>, b :: <var-stat>) => (r :: <boolean>)
+  a.usage > b.usage
+end;
 
 
 /*
@@ -75,21 +112,64 @@ define function setup-watchlist(s :: <sat-solver-it>) => (watchlist :: <array>)
   end while;
   
   for (clause in s.clauses)
+    // push first
+    /* 
+    clause.sorted-lits := clause.lits;
     push-last(watchlist[select-lit(clause)], clause);
-  end for;
-
+    */
+    
+    // push all. weird?
+    /*
+    clause.sorted-lits := clause.lits;
+    for (lit in clause.lits)
+      push-last(watchlist[lit], clause);
+    end;
+    */
+    
+    // sort literals in clause by usage, get first
+    /* */
+    clause.sorted-lits := sort(clause.lits, test: method (l1 :: <integer>, l2 :: <integer>) => (r :: <boolean>)
+						let v1 = lit-to-var(l1);
+						let v2 = lit-to-var(l2);
+						
+						sort-var-stat(s.var-stats[v1], s.var-stats[v2]);
+					      end);
+      
+    push-last(watchlist[clause.sorted-lits[0]], clause);
+    
+    /*
+    for (lit in clause.sorted-lits)
+      push-last(watchlist[lit], clause);
+    end;
+      */
+    
+  end;
+  
   watchlist;
 end;
 
-define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>);
+define function dup-watchlist (watchlist :: <array>) => (duped :: <array>)
+  let new-watchlist = copy-sequence(watchlist);
+  
+  for(i from 0 below size(new-watchlist))
+    new-watchlist[i] := copy-sequence(new-watchlist[i]);
+  end;
+  
+  new-watchlist
+end;
+
+define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>, new-watchlist :: <array>);
+  
+  let w-watchlist = dup-watchlist(watchlist);
+  
   block (main-ret)
 
-    while (size(watchlist[false_literal]) > 0)
-      let clause :: <clause-it> = watchlist[false_literal][0];
+    while (size(w-watchlist[false_literal]) > 0)
+      let clause :: <clause-it> = w-watchlist[false_literal][0];
       let found-alternative :: <boolean> = #f;
 
       block (get-out)	
-	for (alternative in clause.lits)
+	for (alternative in clause.sorted-lits)
 	  let var = lit-to-var(alternative); // ash(alternative, -1); 
 	  let is-negated = negated?(alternative); // 
 	  let has-assignment = element(assignments, var, default: #"none");
@@ -97,10 +177,10 @@ define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false
 	    found-alternative := #t;
 	    
 	    // delete first
-	    pop(watchlist[false_literal]);
+	    pop(w-watchlist[false_literal]);
 	    
 	    // append to end
-	    push-last(watchlist[alternative], clause);
+	    push-last(w-watchlist[alternative], clause);
 	    
 	    get-out();
 	  end if;
@@ -108,25 +188,19 @@ define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false
       end block;
       
       if (~found-alternative)
-	main-ret(#f);
+	main-ret(#f, watchlist);
       end if;
     end while;
 
-    main-ret(#t);
+    main-ret(#t, w-watchlist);
   end block
 end method;
 
-define class <var-stat> ()
-  slot var :: <integer>, init-keyword: var:;
-  slot usage :: <integer> = 0;
-end;
-
-define function sort-var-stat (a :: <var-stat>, b :: <var-stat>) => (r :: <boolean>)
-  a.usage > b.usage
-end;
-
-define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
+define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>), 
+					       stats :: <minisat-stats>);
   let var-count :: <integer> = o.var-count;
+  let sat-stats :: <minisat-stats> = make(<minisat-stats>);
+  o.sat-stats := sat-stats;
 
   // Sort variables by usage.
   let stats = make(<array>, dimensions: list(var-count), fill: #f);
@@ -140,14 +214,10 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
     end;
   end;
   
-  sort!(stats, test: sort-var-stat, stable: #t);
-  
-  
-  /*
-  for(s in stats)
-    format-out("%=: %=\n", s.var, s.usage);
-  end;
-  force-out(); */
+  let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
+  o.var-stats := stats;
+  o.sorted-var-stats := sorted-stats;
+  sat-stats.var-stats := sorted-stats;
   
   /*
     assignments: our assignments at the moment
@@ -170,20 +240,21 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
   let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0); 
   let tried-something :: <boolean> = #f;
   
+  sat-stats.var-no := var-count;
+  sat-stats.clause-no := size(o.clauses);
+  
   block (solve-ret)
     while (#t)
+      sat-stats.iterations := sat-stats.iterations + 1;
 
       // dh is a helper index
       assert(dh >= 0 & d <= var-count);
       
-      // TODO unit propagation here ???
-
-
       if (dh = var-count)
 	// All variables are assigned
 	// so we will return our assignments
 	// we could continue though ...
-	solve-ret(assignments);
+	solve-ret(assignments, sat-stats);
 
 	dh := dh - 1;
 	d := stats[dh].var;
@@ -218,11 +289,18 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
 	    // this is the value we'll try
 
 	    let v = var-value-to-lit(d, a);
-	    if (~update-watchlist(o, watchlist, v, assignments))
+	    let (no-conflict, new-watchlist) = update-watchlist(o, watchlist, v, assignments);
+	    watchlist := new-watchlist;
+	    if (~no-conflict)
 	      // undo assignment, lets try again
 	      remove-key!(assignments, d);
+	      
+	      sat-stats.failed-assignments := sat-stats.failed-assignments + 1;
 	    else
-	      dh := dh + 1;    
+	      dh := dh + 1;
+	      
+	      sat-stats.correct-assignments := sat-stats.correct-assignments + 1;
+	      	      
 	      exit-for-block();
 	    end if;		    
 	  end if;
@@ -230,14 +308,17 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
       end block;
 
       if (~tried-something)
+	sat-stats.n-tried-something := sat-stats.n-tried-something + 1;
+	
 	if (dh = 0)
-	  solve-ret(#f);
+	  solve-ret(#f, sat-stats);
 	  // no more solutions
 	else
 	  // backtrack, undo state, assignment and variable
 	  state[d] := 0;
 	  remove-key!(assignments, d);
 	  dh := dh - 1;
+	  sat-stats.backtracks := sat-stats.backtracks + 1;
 	end if;
       end if;
     end while;
@@ -245,6 +326,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>));
 end;
 
 // TODO watchlists are not adjusted on backtracking, minisat.pdf says that some constraint systems might need this. see undo lists (page 4, Propagation)
+// * Right now we're only undoing watchlists when a conflict is detected
 
 // TODO cleanup variables, sort by activity
 
@@ -257,8 +339,8 @@ end;
 // TODO activity
 
 // TODO heuristics:
-// - sort variables by usage in the input problem
-// - proprocessing: limited applications of resolution steps (wot?)
+// - sort variables by usage in the input problem (DONE)
+// - preprocessing: limited applications of resolution steps (wot?)
 // - aggressive backtracking, ie, dont jump only 1 var at a time
 // - dynamic sort of variables (why?)
 

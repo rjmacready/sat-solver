@@ -9,6 +9,16 @@ define class <clause> (<object>)
   slot vars :: <stretchy-vector> = make(<stretchy-vector>);
 end class;
 
+define class <sat-stats> (<object>)
+  slot var-no :: <integer> = 0;
+  slot clause-no :: <integer> = 0;
+end class;
+
+define method print-object (o :: <sat-stats>, s :: <stream>) => ()
+  format(s, " # vars: %=\n", o.var-no);
+  format(s, " # clauses: %=\n", o.clause-no);
+end;
+
 define class <sat-solver> (<object>)
   /* current free index to assign to a variable */
   slot var-count :: <integer> = 0;
@@ -74,11 +84,11 @@ define method add-clause (s :: <sat-solver>, c :: <string>) => ();
   add!(s.clauses, c);
 end method;
 
-define generic solve (s :: <sat-solver>) => (r :: false-or(<table>));
-define generic update-watchlist (s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (result :: <boolean>);
-define generic solve-impl (s :: <sat-solver>, watchlist :: <array>) => (fail-or-result :: false-or(<table>));
+define generic solve (s :: <sat-solver>) => (r :: false-or(<table>), s :: <sat-stats>);
+define generic update-watchlist (s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (result :: <boolean>, new-watchlist :: <array>);
+define generic solve-impl (s :: <sat-solver>, watchlist :: <array>) => (fail-or-result :: false-or(<table>), s :: <sat-stats>);
 
-define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>);
+define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_literal :: <integer>, assignments :: <table>) => (r :: <boolean>, new-watchlist :: <array>);
   block (main-ret)
 
     while (size(watchlist[false_literal]) > 0)
@@ -107,20 +117,21 @@ define method update-watchlist(s :: <sat-solver>, watchlist :: <array>, false_li
       end block;
       
       if (~found-alternative)
-	main-ret(#f);
+	main-ret(#f, watchlist);
       end if;
     end while;
 
-    main-ret(#t);
+    main-ret(#t, watchlist);
   end block
 end method;
 
-define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or(<table>));
+define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or(<table>), s :: <sat-stats>);
   let var-count :: <integer> = o.var-count;
+  let stats :: <sat-stats> = make(<sat-stats>);
   local method solve-impl-rec (watchlist, assignment :: <table>, d :: <integer>)
 	  block (solve-ret)
 	    if (d = var-count)
-	      solve-ret(assignment);
+	      solve-ret(assignment, stats);
 	    else
 	      for(a :: <integer> in list(0, 1))
 		assignment[d] := a;
@@ -138,14 +149,14 @@ define method solve-impl (o :: <sat-solver-rec>, w :: <array>) => (r :: false-or
 	      remove-key!(assignment, d);
 	    end if;
 	    
-	    solve-ret(#f);
+	    solve-ret(#f, stats);
 	  end block
 	end method;
   
   solve-impl-rec (w, make(<table>), 0)
 end method;
 
-define method solve (o :: <sat-solver>) => (r :: false-or(<table>));
+define method solve (o :: <sat-solver>) => (r :: false-or(<table>), s :: <sat-stats>);
   let watchlist = make(<array>, dimensions: list(o.var-count * 2));
   local method setup-watchlist()
 	  let i = 0;
@@ -161,6 +172,5 @@ define method solve (o :: <sat-solver>) => (r :: false-or(<table>));
   
   setup-watchlist();
 
-  let r = solve-impl(o, watchlist);
-  r
+  solve-impl(o, watchlist);
 end method;

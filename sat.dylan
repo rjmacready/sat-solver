@@ -30,12 +30,13 @@ define function main
 		  end;
 	  
 	  parse-cnf-stream!(stream, s);
-          let solved = solve(s);
+          let (solved, stats) = solve(s);
           if (solved)
 	    print-assignments(s, solved);
 	  else
 	    format-out("#f\n");
 	  end;
+          format-out("stats:\n%=\n", stats);
 	end;
 
   if (out-file)
