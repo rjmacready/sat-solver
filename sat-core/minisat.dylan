@@ -10,14 +10,24 @@ define class <minisat-stats> (<sat-stats>)
   slot correct-assignments :: <integer> = 0;
   slot n-tried-something :: <integer> = 0;
   slot var-stats :: <collection>;
+  slot clause-stats :: <collection>;
 end;
 
 define method print-object (o :: <minisat-stats>, s :: <stream>) => ()
   next-method();
   
-  format(s, " Var Usage:\n");
+  format(s, " Var Stats:\n");
   for(var-stat in o.var-stats)
-    format(s, " * %= (u: %=)\n", var-stat.var, var-stat.usage);
+    format(s, " * %= (u: %=, p: %=, n: %=)\n", var-stat.var, var-stat.usage,
+	   var-stat.pos-lit, var-stat.neg-lit);
+  end;
+
+  format(s, " Clause Stats:\n");
+  for(clause-stat in o.clause-stats)
+    format(s, " * %= (e: %=, l: %=, v: %=)\n", clause-stat.clause-idx,
+	   clause-stat.no-elements,
+	   clause-stat.no-distinct-lits,
+	   clause-stat.no-distinct-vars);
   end;
   
   format(s, " backtracks: %=\n", o.backtracks);
@@ -35,14 +45,26 @@ define class <clause-it> (<object>)
 end class;
 
 define class <sat-solver-it> (<sat-solver>)
+  slot sat-stats :: <sat-stats>;
+  
   slot var-stats :: <array>;
   slot sorted-var-stats :: <array>;
-  slot sat-stats :: <sat-stats>;
+
+  slot clause-stats :: <array>;
 end class;
 
 define class <var-stat> ()
   slot var :: <integer>, init-keyword: var:;
   slot usage :: <integer> = 0;
+  slot pos-lit :: <integer> = 0;
+  slot neg-lit :: <integer> = 0;
+end;
+
+define class <clause-stat> ()
+  slot clause-idx :: <integer>, init-keyword: clause-idx:;
+  slot no-elements :: <integer> = 0;
+  slot no-distinct-lits :: <integer> = 0;
+  slot no-distinct-vars :: <integer> = 0;
 end;
 
 define function sort-var-stat (a :: <var-stat>, b :: <var-stat>) => (r :: <boolean>)
@@ -202,7 +224,9 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   let sat-stats :: <minisat-stats> = make(<minisat-stats>);
   o.sat-stats := sat-stats;
 
-  // Sort variables by usage.
+  /*
+    Calculate stats on variables
+    */
   let stats = make(<array>, dimensions: list(var-count), fill: #f);
   for(i from 0 below var-count)
     stats[i] := make(<var-stat>, var: i);
@@ -211,14 +235,50 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
     for(lit in clause.lits)
       let v = lit-to-var(lit);
       stats[v].usage := stats[v].usage + 1;
+      if (negated?(lit) = 0)
+	stats[v].pos-lit := stats[v].pos-lit + 1;
+      else
+	stats[v].neg-lit := stats[v].neg-lit + 1;
+      end;
     end;
   end;
   
+  /*
+  Sort by usage
+  */
   let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
   o.var-stats := stats;
   o.sorted-var-stats := sorted-stats;
   sat-stats.var-stats := sorted-stats;
+
+  /*
+    Calculate stats on clauses
+    */
+  let c-stats = make(<array>, dimensions: list(size(o.clauses)), fill: #f);
+  for(i from 0 below size(o.clauses))
+    c-stats[i] := make(<clause-stat>, clause-idx: i);
+  end;
+  for(i from 0 below size(o.clauses))
+    let clause = o.clauses[i];
+    let tmp-info-lits = make(<table>);
+    let tmp-info-vars = make(<table>);
+    
+    for(lit in clause.lits)
+      tmp-info-lits[lit] := #t;
+      tmp-info-vars[lit-to-var(lit)] := #t;
+    end;
+    /*
+    let tmp-info-lits! = tmp-info-lits.table-vector;
+    let tmp-info-vars! = tmp-info-vars.table-vector;
+    */
+    c-stats[i].no-elements := size(clause.lits);
+    c-stats[i].no-distinct-lits := size(tmp-info-lits);
+    c-stats[i].no-distinct-vars := size(tmp-info-vars);
+  end;
   
+  o.clause-stats := c-stats;
+  sat-stats.clause-stats := c-stats;
+    
   /*
     assignments: our assignments at the moment
     
@@ -242,6 +302,9 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   
   sat-stats.var-no := var-count;
   sat-stats.clause-no := size(o.clauses);
+
+  format-out("%=\n", sat-stats);
+  force-out();
   
   block (solve-ret)
     while (#t)
@@ -275,7 +338,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
       
       tried-something := #f;
       block (exit-for-block)
-	for (a :: <integer> in list(0, 1))
+	for (a :: <integer> in list(1, 0))
 	  
 	  // (state[d] >> a) & 1 == 0
 	  if (logand(ash(state[d], -a), 1) = 0) 
@@ -332,7 +395,7 @@ end;
 
 // TODO stack of variable assignments (trail) - dont follow variable index -, decide variables
 
-// TODO when conflicts arise, learn
+// TODO when conflicts arise, learn (STUDY)
 
 // TODO simplify clauses using boolean algebra (local and globally (?))
 
@@ -340,7 +403,7 @@ end;
 
 // TODO heuristics:
 // - sort variables by usage in the input problem (DONE)
-// - preprocessing: limited applications of resolution steps (wot?)
+// - preprocessing: limited applications of resolution steps (STUDY)
 // - aggressive backtracking, ie, dont jump only 1 var at a time
 // - dynamic sort of variables (why?)
 
