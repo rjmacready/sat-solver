@@ -218,8 +218,46 @@ define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false
   end block
 end method;
 
+define class <profile> ()
+  slot current-id :: <integer> = 0;
+  slot root-directory :: <locator>;
+end class;
+
+define class <profile-entry> ()
+  slot id :: <integer>;
+  slot keys :: <array>;
+end class;
+
+define function profile-data (p :: <profile>, 
+			      key :: <string>, 
+			      #rest data, #key, #all-keys)
+
+  // TODO create an entry for this profile entry
+  let entry = make(<profile-entry>);
+  
+  // TODO increase counter, take timestamp
+  p.current-id := p.current-id + 1;
+  entry.id := p.current-id;
+  
+  let l :: <integer> = size(data);
+  
+  // TODO create a directory ?
+  let keys = make(<array>, dimensions: list(l / 2), fill: #f);
+  
+  for(i :: <integer> from 0 below l by 2)
+    let idx :: <integer> = i / 2; 
+    // TODO for each value, create a dood entry
+    keys[ idx ] := data[i];
+    
+  end;
+  
+end;
+
 define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>), 
 					       stats :: <minisat-stats>);
+  
+  profile-data(make(<profile>), "solve", solver: o);
+  
   let var-count :: <integer> = o.var-count;
   let sat-stats :: <minisat-stats> = make(<minisat-stats>);
   o.sat-stats := sat-stats;
@@ -267,10 +305,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
       tmp-info-lits[lit] := #t;
       tmp-info-vars[lit-to-var(lit)] := #t;
     end;
-    /*
-    let tmp-info-lits! = tmp-info-lits.table-vector;
-    let tmp-info-vars! = tmp-info-vars.table-vector;
-    */
+    
     c-stats[i].no-elements := size(clause.lits);
     c-stats[i].no-distinct-lits := size(tmp-info-lits);
     c-stats[i].no-distinct-vars := size(tmp-info-vars);
