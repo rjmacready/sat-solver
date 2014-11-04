@@ -44,11 +44,31 @@ define class <clause-it> (<object>)
   slot sorted-lits :: <collection>;
 end class;
 
+
+define function filter (predicate :: <function>, ls :: <collection>) => (f :: <collection>)
+  local method if-predicate-is-true-append (t, e)
+	  if (predicate(e))
+	    push-last(t, e);
+	  else
+	    t
+	  end;
+	end;
+  reduce(if-predicate-is-true-append, make(<deque>), ls)
+end;
+
+define function free-lits (clause :: <clause-it>, assignments :: <table>) => (free-lits :: <collection>)
+  local method is-unassigned?(lit :: <integer>)
+	  let var = lit-to-var(lit);
+	  let elem = element(assignments, var, default: #"none");
+	  elem = #"none"
+	end;
+  filter(is-unassigned?, clause.lits)
+end;
+
 define class <sat-solver-it> (<sat-solver>)
   slot sat-stats :: <sat-stats>;
   
   slot var-stats :: <array>;
-  slot sorted-var-stats :: <array>;
 
   slot clause-stats :: <array>;
 end class;
@@ -106,12 +126,13 @@ define method initialize (pool :: <variable-pool>, #key) => ()
   
   /*
   Sort by usage
-  */
-  let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
-  o.var-stats := stats;
-  o.sorted-var-stats := sorted-stats;
-  sat-stats.var-stats := sorted-stats;
 
+  let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
+  o.sorted-var-stats := sorted-stats;
+  */
+  
+  sat-stats.var-stats := stats;
+    
   /*
     Calculate stats on clauses
     */
@@ -151,14 +172,50 @@ define method initialize (pool :: <variable-pool>, #key) => ()
   format-out("ended initialize\n"); force-out();
 end;
 
+define generic select-var (pool :: <variable-pool>, wanted-var :: <integer>) => (selected :: <integer>);
 define generic select-next (pool :: <variable-pool>) => (selected :: <integer>);
 define generic undo-selection (pool :: <variable-pool>) => (new-head :: <integer>, undone :: <integer>);
 define generic undo-until (pool :: <variable-pool>, until-var :: <integer>) => ();
 
+define method select-var (pool :: <variable-pool>, wanted-var :: <integer>) => (selected :: <integer>)
+  // TODO gets a variable from the pool "manually", without resort unused.
+  // TODO 
+  wanted-var
+end;
+
+define method print-list (l :: <collection>) => ()
+  let s = size(l);
+  if(s > 0)
+    format-out("%=", l[0]);
+    for (i from 1 below s)
+      format-out(" %=", l[i]);
+    end;
+  end;
+end;
+
 define method select-next (pool :: <variable-pool>) => (selected :: <integer>)
-  // TODO resort unused
-  format-out("* selecting ...\n"); force-out();
+  // resort unused
+  format-out("* resorting ...\n"); force-out();
   
+  let solver = pool.solver;
+  let stats = solver.sat-stats;
+  
+  // TODO start with most used vars, it will help improve unit propagation
+  local method unused-test (a1 :: <integer>, a2 :: <integer>) => (r :: <boolean>)
+	  let a1-stats :: <var-stat> = stats.var-stats[a1];
+	  let a2-stats :: <var-stat> = stats.var-stats[a2];
+	  a1-stats.usage > a2-stats.usage
+	end;
+
+  pool.unused := sort!(pool.unused, test: unused-test, stable: #t);
+  
+  format-out("* sorted: ");
+  print-list(pool.unused); 
+  format-out("\n");
+  force-out();
+  
+  format-out("* selecting ...\n"); force-out();
+    
   let element = pop(pool.unused);
   push(pool.used, element);
 
@@ -246,10 +303,10 @@ define function setup-watchlist(s :: <sat-solver-it>) => (watchlist :: <array>)
   
   for (clause in s.clauses)
     // push first
-    /* 
+    /* */
     clause.sorted-lits := clause.lits;
     push-last(watchlist[select-lit(clause)], clause);
-    */
+    
     
     // push all. weird?
     /*
@@ -260,15 +317,16 @@ define function setup-watchlist(s :: <sat-solver-it>) => (watchlist :: <array>)
     */
     
     // sort literals in clause by usage, get first
-    /* */
+    /* 
     clause.sorted-lits := sort(clause.lits, test: method (l1 :: <integer>, l2 :: <integer>) => (r :: <boolean>)
 						let v1 = lit-to-var(l1);
 						let v2 = lit-to-var(l2);
 						
 						sort-var-stat(s.var-stats[v1], s.var-stats[v2]);
 					      end);
-      
+
     push-last(watchlist[clause.sorted-lits[0]], clause);
+      */
     
     /*
     for (lit in clause.sorted-lits)
@@ -367,7 +425,30 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   block (solve-ret)
     while (#t)
       sat-stats.iterations := sat-stats.iterations + 1;
+      
+      // TODO preprocessing
+      for (i from 0 below size(o.clauses))
+	let clause = o.clauses[i];
+	let frees = free-lits(clause, assignments);
 
+	// TODO if we find empty clauses, UNSAT
+	if(size(frees) = 0)
+	  format-out("*OPP UNSAT\n");
+	  force-out();
+	end;
+	
+	// TODO lets try unit propagation
+	// but look out for possible conflicts, from which we have to learn (?)
+	if(size(frees) = 1)
+	  format-out("*OPP UNIT PROPAGATION at clause #%= (", i);
+	  print-list(map(lit-to-var, clause.lits));
+	  format-out(") has free: %=\n", lit-to-var(frees[0]));
+	  force-out();
+	end;
+	
+      end;
+      // end preprocesseing
+      
       // dh is a helper index
       assert(dh >= 0, "dh (%=) is less than 0\n", dh); 
       assert(d <= var-count, "d (%=) is greater than var-count (%=)\n", d, var-count); 
