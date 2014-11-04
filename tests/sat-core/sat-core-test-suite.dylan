@@ -47,7 +47,7 @@ define test shift-right-is-ash-minus-one ()
 end test;
 
 define test simple-sat ()
-  let x = make(<sat-solver-rec>);
+  let x = make(<sat-solver-it>);
   x.var-count := 2;
 
   // x /\ y
@@ -58,7 +58,7 @@ define test simple-sat ()
 end test;
 
 define test simple-unsat ()
-  let x = make(<sat-solver-rec>);
+  let x = make(<sat-solver-it>);
   x.var-count := 1;
   
   // x /\ ~x

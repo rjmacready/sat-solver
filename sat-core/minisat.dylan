@@ -71,6 +71,117 @@ define function sort-var-stat (a :: <var-stat>, b :: <var-stat>) => (r :: <boole
   a.usage > b.usage
 end;
 
+define class <variable-pool> ()
+  slot solver :: <sat-solver>, init-keyword: solver:;
+  slot used :: <deque>;
+  slot unused :: <deque>;
+end class;
+
+define method initialize (pool :: <variable-pool>, #key) => ()
+  format-out("initialize\n"); force-out();
+  
+  // calculate all statistics here
+  let o :: <sat-solver> = pool.solver;
+  let sat-stats :: <sat-stats> = o.sat-stats;
+  let var-count :: <integer> = o.var-count;
+  
+  /*
+    Calculate stats on variables
+    */
+  let stats = make(<array>, dimensions: list(var-count), fill: #f);
+  for(i from 0 below var-count)
+    stats[i] := make(<var-stat>, var: i);
+  end;
+  for(clause in o.clauses)
+    for(lit in clause.lits)
+      let v = lit-to-var(lit);
+      stats[v].usage := stats[v].usage + 1;
+      if (negated?(lit) = 0)
+	stats[v].pos-lit := stats[v].pos-lit + 1;
+      else
+	stats[v].neg-lit := stats[v].neg-lit + 1;
+      end;
+    end;
+  end;
+  
+  /*
+  Sort by usage
+  */
+  let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
+  o.var-stats := stats;
+  o.sorted-var-stats := sorted-stats;
+  sat-stats.var-stats := sorted-stats;
+
+  /*
+    Calculate stats on clauses
+    */
+  let c-stats = make(<array>, dimensions: list(size(o.clauses)), fill: #f);
+  for(i from 0 below size(o.clauses))
+    c-stats[i] := make(<clause-stat>, clause-idx: i);
+  end;
+  for(i from 0 below size(o.clauses))
+    let clause = o.clauses[i];
+    let tmp-info-lits = make(<table>);
+    let tmp-info-vars = make(<table>);
+    
+    for(lit in clause.lits)
+      tmp-info-lits[lit] := #t;
+      tmp-info-vars[lit-to-var(lit)] := #t;
+    end;
+    /*
+    let tmp-info-lits! = tmp-info-lits.table-vector;
+    let tmp-info-vars! = tmp-info-vars.table-vector;
+    */
+    c-stats[i].no-elements := size(clause.lits);
+    c-stats[i].no-distinct-lits := size(tmp-info-lits);
+    c-stats[i].no-distinct-vars := size(tmp-info-vars);
+  end;
+  
+  o.clause-stats := c-stats;
+  sat-stats.clause-stats := c-stats;
+
+  // ...
+  
+  pool.used := make(<deque>);
+  pool.unused := make(<deque>);
+  for(i from 0 below var-count)
+    push-last(pool.unused, i);
+  end;
+
+  format-out("ended initialize\n"); force-out();
+end;
+
+define generic select-next (pool :: <variable-pool>) => (selected :: <integer>);
+define generic undo-selection (pool :: <variable-pool>) => (new-head :: <integer>, undone :: <integer>);
+define generic undo-until (pool :: <variable-pool>, until-var :: <integer>) => ();
+
+define method select-next (pool :: <variable-pool>) => (selected :: <integer>)
+  // TODO resort unused
+  format-out("* selecting ...\n"); force-out();
+  
+  let element = pop(pool.unused);
+  push(pool.used, element);
+
+  format-out("* next %=\n", element); force-out();
+  
+  element;
+end;
+
+define method undo-selection (pool :: <variable-pool>) => (new-head :: <integer>, undone :: <integer>);
+  format-out("* undoing ...\n"); force-out();
+  
+  let undone = pop(pool.used);
+  push(pool.unused, undone);
+  
+  format-out("* undo %=\n", undone); force-out();
+  
+  values(pool.used[0], undone)
+end;
+
+define method undo-until (pool :: <variable-pool>, until-var :: <integer>) => ();  
+  while (undo-selection(pool) ~= until-var)    
+  end;
+end;
 
 /*
  Extract the variable from a literal
@@ -220,65 +331,11 @@ end method;
 
 define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>), 
 					       stats :: <minisat-stats>);
-  let var-count :: <integer> = o.var-count;
   let sat-stats :: <minisat-stats> = make(<minisat-stats>);
+  let var-count :: <integer> = o.var-count;  
   o.sat-stats := sat-stats;
+  let v-pool = make(<variable-pool>, solver: o);
 
-  /*
-    Calculate stats on variables
-    */
-  let stats = make(<array>, dimensions: list(var-count), fill: #f);
-  for(i from 0 below var-count)
-    stats[i] := make(<var-stat>, var: i);
-  end;
-  for(clause in o.clauses)
-    for(lit in clause.lits)
-      let v = lit-to-var(lit);
-      stats[v].usage := stats[v].usage + 1;
-      if (negated?(lit) = 0)
-	stats[v].pos-lit := stats[v].pos-lit + 1;
-      else
-	stats[v].neg-lit := stats[v].neg-lit + 1;
-      end;
-    end;
-  end;
-  
-  /*
-  Sort by usage
-  */
-  let sorted-stats = sort(stats, test: sort-var-stat, stable: #t);
-  o.var-stats := stats;
-  o.sorted-var-stats := sorted-stats;
-  sat-stats.var-stats := sorted-stats;
-
-  /*
-    Calculate stats on clauses
-    */
-  let c-stats = make(<array>, dimensions: list(size(o.clauses)), fill: #f);
-  for(i from 0 below size(o.clauses))
-    c-stats[i] := make(<clause-stat>, clause-idx: i);
-  end;
-  for(i from 0 below size(o.clauses))
-    let clause = o.clauses[i];
-    let tmp-info-lits = make(<table>);
-    let tmp-info-vars = make(<table>);
-    
-    for(lit in clause.lits)
-      tmp-info-lits[lit] := #t;
-      tmp-info-vars[lit-to-var(lit)] := #t;
-    end;
-    /*
-    let tmp-info-lits! = tmp-info-lits.table-vector;
-    let tmp-info-vars! = tmp-info-vars.table-vector;
-    */
-    c-stats[i].no-elements := size(clause.lits);
-    c-stats[i].no-distinct-lits := size(tmp-info-lits);
-    c-stats[i].no-distinct-vars := size(tmp-info-vars);
-  end;
-  
-  o.clause-stats := c-stats;
-  sat-stats.clause-stats := c-stats;
-    
   /*
     assignments: our assignments at the moment
     
@@ -295,7 +352,8 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   let assignments :: <table> = make(<table>);
   
   let dh :: <integer> = 0;
-  let d :: <integer> = stats[dh].var;
+  let d :: <integer> = -1; // stats[dh].var;
+  let can-select-next :: <boolean> = #t;
 
   let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0); 
   let tried-something :: <boolean> = #f;
@@ -304,14 +362,17 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   sat-stats.clause-no := size(o.clauses);
 
   format-out("%=\n", sat-stats);
-  force-out();
+  force-out();  
   
   block (solve-ret)
     while (#t)
       sat-stats.iterations := sat-stats.iterations + 1;
 
       // dh is a helper index
-      assert(dh >= 0 & d <= var-count);
+      assert(dh >= 0, "dh (%=) is less than 0\n", dh); 
+      assert(d <= var-count, "d (%=) is greater than var-count (%=)\n", d, var-count); 
+      assert(dh <= size(v-pool.used), "dh (%=) is greater than size(v-pool.used) (%=)\n", dh, size(v-pool.used));
+      
       
       if (dh = var-count)
 	// All variables are assigned
@@ -320,16 +381,23 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	solve-ret(assignments, sat-stats);
 
 	dh := dh - 1;
-	d := stats[dh].var;
+	// d := stats[dh].var;
+	d := undo-selection(v-pool);
 	
 	// FIXME undo assigment too, right? python doesnt do it
       else
 	// select next var
-	d := stats[dh].var;
+	// d := stats[dh].var;
+	if (can-select-next) 
+	  d := select-next(v-pool);
+	end if;
       end if;
+      
+      can-select-next := #f;
 
       // d is an actual variable
-      assert(d >= 0 & d < var-count);
+      assert(d >= 0 & d < var-count, "d (%=) is outside [%=, %=[", d, 0, var-count);
+      assert(dh = size(v-pool.used) - 1, "dh (%=) is different of size(v-pool.used) - 1 (%=)\n", dh, size(v-pool.used) - 1);
       
       /*
 	try to assign a value; 
@@ -361,6 +429,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	      sat-stats.failed-assignments := sat-stats.failed-assignments + 1;
 	    else
 	      dh := dh + 1;
+	      can-select-next := #t;
 	      
 	      sat-stats.correct-assignments := sat-stats.correct-assignments + 1;
 	      	      
@@ -381,6 +450,8 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	  state[d] := 0;
 	  remove-key!(assignments, d);
 	  dh := dh - 1;
+	  d := undo-selection(v-pool);
+	  // can-select-next := #t;
 	  sat-stats.backtracks := sat-stats.backtracks + 1;
 	end if;
       end if;
