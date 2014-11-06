@@ -31,6 +31,7 @@ define function main
 	  
 	  parse-cnf-stream!(stream, s);
           let (solved, stats) = solve(s);
+          format-out("RESULT:\n");
           if (solved)
 	    print-assignments(s, solved);
 	  else
