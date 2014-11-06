@@ -257,7 +257,7 @@ end;
 
 define generic select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>) => (selected :: <integer>);
 define generic select-next (pool :: <variable-pool>, current-level :: <integer>) => (selected :: <integer>);
-define generic undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => ();
+define generic undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>);
 
 define method select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>) => (selected :: <integer>)
   assert(current-level >= 0, "select-var: current-level should be at least 0 (is %=)\n", current-level);
@@ -310,7 +310,7 @@ define method select-next (pool :: <variable-pool>, current-level :: <integer>) 
 	  a1-stats.usage > a2-stats.usage
 	end;
 
-  pool.unused := sort!(pool.unused, test: unused-test, stable: #t);
+  // pool.unused := sort!(pool.unused, test: unused-test, stable: #t);
 
   format-out("* used: ");
   print-list(pool.used); 
@@ -340,7 +340,7 @@ define method select-next (pool :: <variable-pool>, current-level :: <integer>) 
   element.variable;
 end;
 
-define method undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => ()
+define method undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>)
   assert(current-level >= 0, "undo-level: current-level should be at least 0 (is %=)\n", current-level);
   assert(size(pool.used) > 0, "undo-level: used shouldnt be empty\n");
   let done-something = #f;
@@ -367,6 +367,7 @@ define method undo-level (pool :: <variable-pool>, current-level :: <integer>, a
 	 "size of unused (%=) + used (%=) is different than var-count (%=)\n",
 	 size(pool.unused), size(pool.used), solver.var-count);
   
+  pool.used[0].variable
 end;
 
 /*
@@ -543,7 +544,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   let watchlist = setup-watchlist(o);
   let assignments :: <table> = make(<table>);
   
-  let dh :: <integer> = -1;
+  let dh :: <integer> = 0;
   let d :: <integer> = -1; // stats[dh].var;
   let can-select-next :: <boolean> = #t;
 
@@ -593,9 +594,9 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
       
       
       // dh is a helper index
-      //assert(dh >= 0, "solve: before branching, dh (%=) is less than 0\n", dh); 
+      assert(dh >= 0, "solve: before branching, dh (%=) is less than 0\n", dh); 
       assert(d <= var-count, "solve: before branching, d (%=) is greater than var-count (%=)\n", d, var-count); 
-      //assert(dh <= size(v-pool.used), "solve: before branching, dh (%=) is greater than size(v-pool.used) (%=)\n", dh, size(v-pool.used));
+      assert(dh <= size(v-pool.used), "solve: before branching, dh (%=) is greater than size(v-pool.used) (%=)\n", dh, size(v-pool.used));
       
       
       if (dh = var-count)
@@ -615,8 +616,9 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	// select next var
 	// d := stats[dh].var;
 	if (can-select-next)
-	  dh := dh + 1;
 	  d := select-next(v-pool, dh);
+	else
+	  // assert(#f, "can-select-next is false, what are we doing here?");
 	end if;
       end if;
       
@@ -624,8 +626,8 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 
       // d is an actual variable
       assert(d >= 0 & d < var-count, "solve: after branching, d (%=) is outside [%=, %=[", d, 0, var-count);
-      //assert(dh = size(v-pool.used) - 1, 
-	//     "solve: after branching, dh (%=) is different of size(v-pool.used) - 1 (%=)\n", dh, size(v-pool.used) - 1);
+      assert(dh = size(v-pool.used) - 1, 
+	     "solve: after branching, dh (%=) is different of size(v-pool.used) - 1 (%=)\n", dh, size(v-pool.used) - 1);
       
       /*
 	try to assign a value; 
@@ -654,11 +656,16 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	    let (no-conflict, new-watchlist) = update-watchlist(o, watchlist, v, assignments);
 	    watchlist := new-watchlist;
 	    if (~no-conflict)
+	      format-out("FAILED ASSIGNMENT %= into %=\n", a, d); force-out();
+	      
 	      // undo assignment, lets try again
 	      remove-key!(assignments, d);
 	      
 	      sat-stats.failed-assignments := sat-stats.failed-assignments + 1;
 	    else
+	      format-out("CORRECT ASSIGNMENT %= into %=\n", a, d); force-out();
+	      
+	      dh := dh + 1;
 	      can-select-next := #t;
 	      
 	      sat-stats.correct-assignments := sat-stats.correct-assignments + 1;
@@ -669,10 +676,10 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	end for;
       end block;
       
-      if (~tried-something)
+      if (~tried-something) // tried-something
 	sat-stats.n-tried-something := sat-stats.n-tried-something + 1;
 	
-	if (dh = -1)
+	if (dh = 0)
 	  format-out("UNSAT\n");
 	  format-out("dh: %=\n", dh);
 	  format-out("pool: %=\n", v-pool);
@@ -685,11 +692,13 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	  format-out("pool: %=\n", v-pool);
 	  format-out("state: %=\n", state);
 	  
-	  // backtrack, undo state, assignment and variable	  
-	  undo-level(v-pool, dh, assignments, state);
-	  dh := dh - 1;
+	  assert(state[d] == 3, "We havent tried everything! state[%=] = %=, state = %=\n", d, state[d], state);
 	  
-	  // can-select-next := #t;
+	  // backtrack, undo state, assignment and variable	  
+	  d := undo-level(v-pool, dh, assignments, state);
+	  dh := dh - 1;
+	  // TODO we should pop a (d)
+	  
 	  sat-stats.backtracks := sat-stats.backtracks + 1;
 	end if;
       end if;
