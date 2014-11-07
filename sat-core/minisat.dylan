@@ -52,10 +52,12 @@ define function free-lits (clause :: <clause-it>, assignments :: <table>) => (as
   let are-all-assigned-false? :: <boolean> = #t;
   let frees :: <stretchy-vector> = make(<stretchy-vector>);
   
+//  format-out("free-lits begin\n"); force-out();
+  
   local method do-stuff (lit :: <integer>)
 	  let var = lit-to-var(lit);
 	  let elem = element(assignments, var, default: #"none");
-	  if (elem ~= "none")
+	  if (elem ~= #"none")
 	    assigned := assigned + 1;
 	    
 	    // we can use a simple xor here, right?
@@ -71,14 +73,17 @@ define function free-lits (clause :: <clause-it>, assignments :: <table>) => (as
   
   do(do-stuff, clause.lits);
   
+//  format-out("free-lits end\n"); force-out();
+  
   values(assigned, are-all-assigned-false?, frees);
 end;
 
 define function print-sat-state (solver :: <sat-solver-it>, assignments :: <table>) => ()
   format-out("***** state: \n");
-  for(clause in solver.clauses)
+  for(i from 0 below size(solver.clauses))
+    let clause = solver.clauses[i];
     // print clause
-    format-out(" C:");
+    format-out(" C #%=:", i);
 
     for(lit in clause.lits)      
       let v = lit-to-var(lit);
@@ -260,23 +265,45 @@ define generic select-next (pool :: <variable-pool>, current-level :: <integer>)
 define generic undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>);
 
 define method select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>) => (selected :: <integer>)
-  assert(current-level >= 0, "select-var: current-level should be at least 0 (is %=)\n", current-level);
-  assert(wanted-var >= 0, "select-var: wanted-var should be at least 0 (is %=)\n", wanted-var);
-  assert(size(pool.unused) > 0, "select-var: pool unused shouldnt be empty\n");
+  let old-size = size(pool.unused);
+  assert(current-level >= 0, 
+	 "select-var: current-level should be at least 0 (is %=)\n", 
+	 current-level);
+  assert(wanted-var >= 0, 
+	 "select-var: wanted-var should be at least 0 (is %=)\n", 
+	 wanted-var);
+  assert(old-size > 0, 
+	 "select-var: pool unused shouldnt be empty\n");
+  
+//  format-out("select-var begin\n");
+  format-out("select-var: wanted-var %=, current-level: %=\n", wanted-var, current-level);
+  format-out("select-var: unused: \n");
+  print-list(pool.unused);
+  format-out("\n"); force-out();
   
   // gets a variable from the pool "manually", without resorting unused
-  let element = find-key(pool.unused, curry(\=, make(<var-assign>, variable: wanted-var, decision-level: -1)));
+  // let idx = find-key(pool.unused, curry(\=, make(<var-assign>, variable: wanted-var, decision-level: -1)));
+  
+  // format-out("idx: %=\n", idx);
+  
+  // let element = pool.unused[idx];
+  let e :: <var-assign> = make(<var-assign>, variable: wanted-var, decision-level: -1);
   
   // find element in pool.unused, remove it from there
-  pool.unused := remove!(pool.unused, element);
-
-  element.decision-level := current-level;
+  pool.unused := remove!(pool.unused, e, test: \=);
+  
+  assert(size(pool.unused) = old-size - 1, "size(pool.unused) [%=] != old-size - 1 [%=] when trying to get %= from %=\n", 
+	 size(pool.unused), old-size - 1, e, pool.unused);
+  
+  e.decision-level := current-level;
   
   // push it into used
-  push(pool.used, element);
+  push(pool.used, e);
+  
+  // format-out("select-var end\n"); force-out();
   
   // return variable
-  element.variable
+  e.variable
 end;
 
 define method print-list (l :: <collection>) => ()
@@ -361,7 +388,7 @@ define method undo-level (pool :: <variable-pool>, current-level :: <integer>, a
     push(pool.unused, element);
   end;  
   
-  assert(done-something, "undo-level: should have done something (current-level: %=)\n", current-level);
+  //assert(done-something, "undo-level: should have done something (current-level: %=)\n", current-level);
 
   assert(size(pool.unused) + size(pool.used) = solver.var-count, 
 	 "size of unused (%=) + used (%=) is different than var-count (%=)\n",
@@ -522,6 +549,88 @@ define method update-watchlist(s :: <sat-solver-it>, watchlist :: <array>, false
   end block
 end method;
 
+// try to make as much assignments as possible in a new decision-level, but cancel the everything
+// if some conflict arises
+define function unit-propagation (o :: <sat-solver-it>, 
+				  v-pool :: <variable-pool>,
+				  assignments :: <table>, 
+				  state :: <array>,
+				  watchlist :: <array>,
+				  dh :: <integer>) => (r :: <boolean>)
+  let d :: <integer> = -1;
+    
+  // unit propagation
+  block (exit-unit-propagation)
+    //block (restart-unit-propagation)
+    let i = 0;
+    while (i < size(o.clauses))
+      let clause = o.clauses[i];
+      let (assigned, all-assigned-are-false?, frees) = free-lits(clause, assignments);
+      
+      if (all-assigned-are-false?)
+	
+	// if we find empty clauses, there's a conflict, either cancel or UNSAT, ...
+	if(size(frees) = 0)
+	  // TODO maybe we shouldnt even be here
+	  // assert(#f, "creeping conflict\n");
+	  
+	  format-out("*OPP UNSAT at clause #%= (", i);
+	  print-list(map(lit-to-var, clause.lits));
+	  format-out(")\n");
+	  force-out();
+
+	  print-sat-state(o, assignments);
+	  
+	  undo-level(v-pool, dh, assignments, state);
+	  exit-unit-propagation(#f);
+	end if;
+	
+	// lets try unit propagation
+	// but look out for possible conflicts,
+	// from which we have to learn (?)
+	if(size(frees) = 1)
+	  let l = frees[0];
+	  let v = lit-to-var(l);
+	  
+	  format-out("*OPP UNIT PROPAGATION at clause #%= (", i);
+	  print-list(map(lit-to-var, clause.lits));
+	  format-out(") has free: %=\n", v);
+	  force-out();
+	  
+	  d := select-var(v-pool, dh, v);
+	  let a = logxor(1, negated?(l));
+	  
+	  state[d] := logior(state[d], ash(1, a));
+	  assignments[d] := a;
+
+	  print-sat-state(o, assignments);
+	  
+	  let v = var-value-to-lit(d, a);
+	  let (no-conflict, new-watchlist) = update-watchlist(o, watchlist, v, assignments);
+	  watchlist := new-watchlist;
+	  
+	  if (no-conflict)
+	    format-out("NO CONFLICT WITH (%= = %=), CONTINUING UNIT PROPAGATION\n", v, a);
+	    i := 0;
+	  else
+	    d := undo-level(v-pool, dh, assignments, state);
+	    	    
+	    format-out("CONFLICT WITH (%= = %=), CANCEL UNIT PROPAGATION\n", v, a);
+
+	    exit-unit-propagation(#f);
+	  end if;
+	else
+	  i := i + 1;
+	end if;
+      else
+	i := i + 1;
+      end if;
+    end while;
+    
+    exit-unit-propagation(#t);
+  end block;
+end;
+
 define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>), 
 					       stats :: <minisat-stats>);
   let sat-stats :: <minisat-stats> = make(<minisat-stats>);
@@ -561,48 +670,20 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
     while (#t)
       sat-stats.iterations := sat-stats.iterations + 1;
       
-      /*
-      // TODO preprocessing
-      for (i from 0 below size(o.clauses))
-	let clause = o.clauses[i];
-	let (assigned, all-assigned-are-false?, frees) = free-lits(clause, assignments);
-	
-	// assigned > 0 & 
-	if (all-assigned-are-false?)
-	  
-	  // TODO if we find empty clauses, there's a conflict, either cancel or UNSAT, ...
-	  if(size(frees) = 0)
-	    format-out("*OPP UNSAT at clause #%= (", i);
-	    print-list(map(lit-to-var, clause.lits));
-	    format-out(")\n");
-	    force-out();
-	  end;
-	  
-	  // TODO lets try unit propagation
-	  // but look out for possible conflicts, from which we have to learn (?)
-	  if(size(frees) = 1)
-	    format-out("*OPP UNIT PROPAGATION at clause #%= (", i);
-	    print-list(map(lit-to-var, clause.lits));
-	    format-out(") has free: %=\n", lit-to-var(frees[0]));
-	    force-out();
-	  end;	
-	end;
-	
-      end;
-      */
-      // end preprocesseing
       
       
       // dh is a helper index
       assert(dh >= 0, "solve: before branching, dh (%=) is less than 0\n", dh); 
       assert(d <= var-count, "solve: before branching, d (%=) is greater than var-count (%=)\n", d, var-count); 
-      assert(dh <= size(v-pool.used), "solve: before branching, dh (%=) is greater than size(v-pool.used) (%=)\n", dh, size(v-pool.used));
+      // assert(dh <= size(v-pool.used), "solve: before branching, dh (%=) is greater than size(v-pool.used) (%=)\n", dh, size(v-pool.used));
       
-      
-      if (dh = var-count)
+      if (size(v-pool.used) = var-count)
 	// All variables are assigned
 	// so we will return our assignments
 	// we could continue though ...
+	format-out("****** FINAL STATE ******\n");
+	print-sat-state(o, assignments);
+	
 	solve-ret(assignments, sat-stats);
 	assert(#f, "should be unreachable\n");
 	// * UNREACHABLE, unless we want more solutions *
@@ -626,8 +707,8 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 
       // d is an actual variable
       assert(d >= 0 & d < var-count, "solve: after branching, d (%=) is outside [%=, %=[", d, 0, var-count);
-      assert(dh = size(v-pool.used) - 1, 
-	     "solve: after branching, dh (%=) is different of size(v-pool.used) - 1 (%=)\n", dh, size(v-pool.used) - 1);
+      //assert(dh = size(v-pool.used) - 1, 
+	//     "solve: after branching, dh (%=) is different of size(v-pool.used) - 1 (%=)\n", dh, size(v-pool.used) - 1);
       
       /*
 	try to assign a value; 
@@ -655,6 +736,18 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	    let v = var-value-to-lit(d, a);
 	    let (no-conflict, new-watchlist) = update-watchlist(o, watchlist, v, assignments);
 	    watchlist := new-watchlist;
+	    
+	    if (no-conflict)
+	      // FIXME care about watchlists?
+	      dh := dh + 1;
+	      
+	      no-conflict := unit-propagation(o, v-pool, assignments, state, watchlist, dh);
+	      
+	      if (~no-conflict)
+		dh := dh - 1;
+	      end;
+	    end;
+	    
 	    if (~no-conflict)
 	      format-out("FAILED ASSIGNMENT %= into %=\n", a, d); force-out();
 	      
