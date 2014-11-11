@@ -3,6 +3,15 @@ Synopsis:
 Author: 
 Copyright: 
 
+
+// TODO ** ARCH REFACTORING **
+// TODO move "execution state" to <sat-solver-it>, the state array, etc etc
+// TODO trim as much as possible to nbr of parameters to functions such as select-* and undo-level, ...
+
+// TODO ** ALG REFACTORING**
+// TODO maybe unit propagation should use that watchlist business? maybe it should
+// be better blended into normal variable selection? looks weird comparing to minisat
+
 define class <minisat-stats> (<sat-stats>)
   slot backtracks :: <integer> = 0;
   slot iterations :: <integer> = 0;
@@ -112,10 +121,14 @@ end;
 
 define class <sat-solver-it> (<sat-solver>)
   slot sat-stats :: <sat-stats>;
-  
   slot var-stats :: <array>;
-
   slot clause-stats :: <array>;
+
+  // execution-wide state, dont export this
+  slot watchlist :: <array>;
+  slot assignments :: <table>;
+  slot var-assigns :: <array>;
+  slot state :: <array>;
 end class;
 
 define class <var-stat> ()
@@ -144,7 +157,6 @@ end class;
 
 // FIXME just to make sure, maybe we dont need this. 
 define method \= (o1 :: <var-assign>, o2 :: <var-assign>) => (r :: <boolean>)
-  // ignore reasons
   o1.variable = o2.variable & o1.decision-level = o2.decision-level
 end;
 
@@ -165,13 +177,13 @@ define method print-object (o :: <var-assign>, s :: <stream>) => ()
   format(s, "}");
 end;
 
-define constant $deque-var-assign = limited(<deque>, of: <var-assign>);
+define constant <deque-var-assign> = limited(<deque>, of: <var-assign>);
 
 define class <variable-pool> ()
   slot solver :: <sat-solver>, init-keyword: solver:;
 
-  slot used :: $deque-var-assign;
-  slot unused :: $deque-var-assign;
+  slot used :: <deque-var-assign>;
+  slot unused :: <deque-var-assign>;
 end class;
 
 define method print-object (p :: <variable-pool>, s :: <stream>) => ()
@@ -202,7 +214,7 @@ define method initialize (pool :: <variable-pool>, #key) => ()
   format-out("initialize\n"); force-out();
   
   // calculate all statistics here
-  let o :: <sat-solver> = pool.solver;
+  let o :: <sat-solver-it> = pool.solver;
   let sat-stats :: <sat-stats> = o.sat-stats;
   let var-count :: <integer> = o.var-count;
   
@@ -263,21 +275,50 @@ define method initialize (pool :: <variable-pool>, #key) => ()
   sat-stats.clause-stats := c-stats;
 
   // ...
+  let assigns = make(<array>, dimensions: list(var-count), fill: #f);
   
-  pool.used := make($deque-var-assign);
-  pool.unused := make($deque-var-assign);
+  pool.used := make(<deque-var-assign>);
+  pool.unused := make(<deque-var-assign>);
   for(i from 0 below var-count)
-    push-last(pool.unused, make(<var-assign>, variable: i, decision-level: -1, reasons: #f));
+    let var-assign = make(<var-assign>, 
+			  variable: i, 
+			  decision-level: -1,
+			  reasons: #f);
+    push-last(pool.unused, var-assign);
+    assigns[i] := var-assign;
   end;
+
+  o.var-assigns := assigns;
 
   format-out("ended initialize\n"); force-out();
 end;
 
-define generic select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, reasons :: <stretchy-vector>) => (selected :: <integer>);
+/*
+define generic select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, selection-reasons :: <stretchy-vector>) => (selected :: <integer>);
 define generic select-next (pool :: <variable-pool>, current-level :: <integer>) => (selected :: <integer>);
 define generic undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>);
+*/
 
-define method select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, reasons :: <stretchy-vector>) => (selected :: <integer>)
+
+define function calc-reason-for-conflict (pool :: <variable-pool>, variable :: <integer>) => (reason, backtrack-level)
+  
+  // walk recursively to find the complete set of assignments that resulted 
+  // in variable = whatever-it-is
+  let solver = pool.solver;
+
+  format-out("calc-reason-for-conflict: %= %=\n", solver.var-assigns, variable);
+  force-out();
+  
+  let v-assign :: <var-assign> = solver.var-assigns[variable];
+  let reason :: <stretchy-vector> = v-assign.reasons;
+  let decision-level :: <integer> = v-assign.decision-level;
+  
+  // TODO recursively accumulate reasons (avoid duplications) and decision-level (min)
+  
+  values(reason, decision-level)
+end;
+
+define function select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, selection-reasons :: <stretchy-vector>) => (selected :: <integer>)
   let old-size = size(pool.unused);
   assert(current-level >= 0, 
 	 "select-var: current-level should be at least 0 (is %=)\n", 
@@ -288,8 +329,9 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
   assert(old-size > 0, 
 	 "select-var: pool unused shouldnt be empty\n");
   
-//  format-out("select-var begin\n");
   format-out("select-var: wanted-var %=, current-level: %=\n", wanted-var, current-level);
+
+  let solver :: <sat-solver-it> = pool.solver;
 
   format-out("select-var: used: \n");
   print-list(pool.used);
@@ -299,14 +341,13 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
   print-list(pool.unused);
   format-out("\n"); force-out();
   
-  // gets a variable from the pool "manually", without resorting unused
-  // let idx = find-key(pool.unused, curry(\=, make(<var-assign>, variable: wanted-var, decision-level: -1)));
+  let idx :: <integer> = find-key(pool.unused, curry(\=, make(<var-assign>, variable: wanted-var, decision-level: -1, reasons: #f)));
+  let e :: <var-assign> = element(pool.unused, idx);
   
-  // format-out("idx: %=\n", idx);
+  assert(e.decision-level = -1, "select-next: decision-level of head should be -1 (is %=)\n", e.decision-level);
   
-  // let element = pool.unused[idx];
-  let e :: <var-assign> = make(<var-assign>, variable: wanted-var, decision-level: -1, reasons: #f);
-  
+  assert(e.reasons = #f, "select-next: reasons should be #f (is %=)\n", e.reasons);
+
   // find element in pool.unused, remove it from there
   pool.unused := remove!(pool.unused, e, test: \=);
   
@@ -314,12 +355,13 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
 	 size(pool.unused), old-size - 1, e, pool.unused);
   
   e.decision-level := current-level;
-  e.reasons := reasons;
+  e.reasons := selection-reasons;
   
   // push it into used
   push(pool.used, e);
   
-  // format-out("select-var end\n"); force-out();
+  assert(size(pool.used) + size(pool.unused) = solver.var-count, 
+	 "number of variables in used (%=) + unused (%=) different of var-count (%=)\n", size(pool.used), size(pool.unused), solver.var-count);
   
   // return variable
   e.variable
@@ -335,14 +377,14 @@ define method print-list (l :: <collection>) => ()
   end;
 end;
 
-define method select-next (pool :: <variable-pool>, current-level :: <integer>) => (selected :: <integer>)
+define function select-next (pool :: <variable-pool>, current-level :: <integer>) => (selected :: <integer>)
   assert(current-level >= 0, "select-next: current-level should be at least 0 (is %=)\n", current-level);
   assert(size(pool.unused) > 0, "select-next: pool unused shouldnt be empty (current-level: %=)\n", current-level);
 
   // resort unused
   format-out("* resorting ...\n"); force-out();
   
-  let solver = pool.solver;
+  let solver :: <sat-solver-it> = pool.solver;
   let stats = solver.sat-stats;
 
   assert(size(pool.unused) + size(pool.used) = solver.var-count, 
@@ -374,25 +416,31 @@ define method select-next (pool :: <variable-pool>, current-level :: <integer>) 
 	 current-level,
 	 pool.unused[0].decision-level);
   
-  let e = pop(pool.unused);
+  let e :: <var-assign> = pop(pool.unused);
   
   assert(e.decision-level = -1, "select-next: decision-level of head should be -1 (is %=)\n", e.decision-level);
+
+  assert(e.reasons = #f, "select-next: reasons should be #f (is %=)\n", e.reasons);
   
   e.decision-level := current-level;
+  // no reasons, picked at "random"
   e.reasons := make(<stretchy-vector>);
   
   push(pool.used, e);
 
   format-out("* next %=\n", e); force-out();
   
+  assert(size(pool.used) + size(pool.unused) = solver.var-count, 
+	 "number of variables in used (%=) + unused (%=) different of var-count (%=)\n", size(pool.used), size(pool.unused), solver.var-count);
+  
   e.variable;
 end;
 
-define method undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>)
+define function undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>)
   assert(current-level >= 0, "undo-level: current-level should be at least 0 (is %=)\n", current-level);
   assert(size(pool.used) > 0, "undo-level: used shouldnt be empty\n");
   let done-something = #f;
-  let solver = pool.solver;
+  let solver :: <sat-solver-it> = pool.solver;
   
   // * move all assigned-vars-on-this-level to unused, set decision-level to -1
   // * remove all assignments on all assigned-vars-on-this-level
@@ -651,10 +699,14 @@ define function unit-propagation (o :: <sat-solver-it>,
 	    format-out("NO CONFLICT WITH (%= = %=), CONTINUING UNIT PROPAGATION\n", v, a);
 	    i := 0;
 	  else
-	    d := undo-level(v-pool, dh, assignments, state);
-	    	    
 	    format-out("CONFLICT WITH (%= = %=), CANCEL UNIT PROPAGATION\n", v, a);
-
+	    
+	    // TODO Learn here
+	    let (reason, bt) = calc-reason-for-conflict(v-pool, d);
+	    format-out("Calc'ed info: (%=, %=, %=)\n", d, reason, bt);
+	    
+	    d := undo-level(v-pool, dh, assignments, state);
+	    
 	    exit-unit-propagation(#f);
 	  end if;
 	else
@@ -674,6 +726,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   let sat-stats :: <minisat-stats> = make(<minisat-stats>);
   let var-count :: <integer> = o.var-count;  
   o.sat-stats := sat-stats;
+    
   let v-pool = make(<variable-pool>, solver: o);
   
   /*
@@ -695,7 +748,9 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   let d :: <integer> = -1; // stats[dh].var;
   let can-select-next :: <boolean> = #t;
 
-  let state :: <array> = make(<array>, dimensions: list(var-count), fill: 0); 
+  o.state := make(<array>, dimensions: list(var-count), fill: 0); 
+  
+  let state = o.state;
   let tried-something :: <boolean> = #f;
   
   sat-stats.var-no := var-count;
@@ -707,8 +762,6 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
   block (solve-ret)
     while (#t)
       sat-stats.iterations := sat-stats.iterations + 1;
-      
-      
       
       // dh is a helper index
       assert(dh >= 0, "solve: before branching, dh (%=) is less than 0\n", dh); 
@@ -818,7 +871,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	  solve-ret(#f, sat-stats);
 	  // no more solutions
 	else
-	  format-out("BACKTRACKING AT %=\n", d);
+	  format-out("CONFLICT WITH CURRENT CONTEXT AT %=, BACKTRACKING\n", d);
 	  format-out("dh: %=\n", dh);
 	  format-out("pool: %=\n", v-pool);
 	  format-out("state: %=\n", state);
