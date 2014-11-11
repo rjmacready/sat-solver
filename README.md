@@ -33,6 +33,8 @@ http://sahandsaba.com/understanding-sat-by-implementing-a-simple-sat-solver-in-p
 
 http://www-cs-faculty.stanford.edu/~uno/programs.html
 
+http://www.msoos.org/
+
 #### Wikipedia
 
 http://en.wikipedia.org/wiki/Boolean_satisfiability_problem

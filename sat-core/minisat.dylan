@@ -46,13 +46,12 @@ end class;
 
 define function free-lits (clause :: <clause-it>, assignments :: <table>) => (assigned :: <integer>,
 									      are-all-assigned-false? :: <boolean>, 
-									      frees :: <collection>)
+									      setted :: <collection>, frees :: <collection>)
   
   let assigned :: <integer> = 0;
   let are-all-assigned-false? :: <boolean> = #t;
   let frees :: <stretchy-vector> = make(<stretchy-vector>);
-  
-//  format-out("free-lits begin\n"); force-out();
+  let setted :: <stretchy-vector> = make(<stretchy-vector>);
   
   local method do-stuff (lit :: <integer>)
 	  let var = lit-to-var(lit);
@@ -60,22 +59,21 @@ define function free-lits (clause :: <clause-it>, assignments :: <table>) => (as
 	  if (elem ~= #"none")
 	    assigned := assigned + 1;
 	    
-	    // we can use a simple xor here, right?
 	    elem := logxor(elem, negated?(lit));
 	    
 	    if (elem = 1)
 	      are-all-assigned-false? := #f;
 	    end;
+	    
+	    setted := add!(setted, lit);
 	  else
 	    frees := add!(frees, lit);
 	  end;	  
 	end;
   
   do(do-stuff, clause.lits);
-  
-//  format-out("free-lits end\n"); force-out();
-  
-  values(assigned, are-all-assigned-false?, frees);
+
+  values(assigned, are-all-assigned-false?, setted, frees);
 end;
 
 define function print-sat-state (solver :: <sat-solver-it>, assignments :: <table>) => ()
@@ -141,15 +139,30 @@ end;
 define class <var-assign> ()
   slot variable :: <integer>, init-keyword: variable:;
   slot decision-level :: <integer>, init-keyword: decision-level:;
+  slot reasons :: false-or(<stretchy-vector>), init-keyword: reasons:;
 end class;
 
-// just to make sure, maybe we dont need this
+// FIXME just to make sure, maybe we dont need this. 
 define method \= (o1 :: <var-assign>, o2 :: <var-assign>) => (r :: <boolean>)
+  // ignore reasons
   o1.variable = o2.variable & o1.decision-level = o2.decision-level
 end;
 
 define method print-object (o :: <var-assign>, s :: <stream>) => ()
-  format(s, "{var: %=, level: %=}", o.variable, o.decision-level);
+  format(s, "{var: %=, level: %=, reasons: ", o.variable, o.decision-level);
+  if (o.reasons)
+    format(s, "{");
+    if (size(o.reasons) > 0)
+      format(s, "%=", o.reasons[0]);
+      for (i from 1 below size(o.reasons))
+	format(s, ", %=", o.reasons[i]);
+      end;
+    end;
+    format(s, "}");
+  else
+      format(s, "%=", o.reasons);
+  end;
+  format(s, "}");
 end;
 
 define constant $deque-var-assign = limited(<deque>, of: <var-assign>);
@@ -254,17 +267,17 @@ define method initialize (pool :: <variable-pool>, #key) => ()
   pool.used := make($deque-var-assign);
   pool.unused := make($deque-var-assign);
   for(i from 0 below var-count)
-    push-last(pool.unused, make(<var-assign>, variable: i, decision-level: -1));
+    push-last(pool.unused, make(<var-assign>, variable: i, decision-level: -1, reasons: #f));
   end;
 
   format-out("ended initialize\n"); force-out();
 end;
 
-define generic select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>) => (selected :: <integer>);
+define generic select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, reasons :: <stretchy-vector>) => (selected :: <integer>);
 define generic select-next (pool :: <variable-pool>, current-level :: <integer>) => (selected :: <integer>);
 define generic undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>);
 
-define method select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>) => (selected :: <integer>)
+define method select-var (pool :: <variable-pool>, current-level :: <integer>, wanted-var :: <integer>, reasons :: <stretchy-vector>) => (selected :: <integer>)
   let old-size = size(pool.unused);
   assert(current-level >= 0, 
 	 "select-var: current-level should be at least 0 (is %=)\n", 
@@ -277,6 +290,11 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
   
 //  format-out("select-var begin\n");
   format-out("select-var: wanted-var %=, current-level: %=\n", wanted-var, current-level);
+
+  format-out("select-var: used: \n");
+  print-list(pool.used);
+  format-out("\n"); force-out();
+
   format-out("select-var: unused: \n");
   print-list(pool.unused);
   format-out("\n"); force-out();
@@ -287,7 +305,7 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
   // format-out("idx: %=\n", idx);
   
   // let element = pool.unused[idx];
-  let e :: <var-assign> = make(<var-assign>, variable: wanted-var, decision-level: -1);
+  let e :: <var-assign> = make(<var-assign>, variable: wanted-var, decision-level: -1, reasons: #f);
   
   // find element in pool.unused, remove it from there
   pool.unused := remove!(pool.unused, e, test: \=);
@@ -296,6 +314,7 @@ define method select-var (pool :: <variable-pool>, current-level :: <integer>, w
 	 size(pool.unused), old-size - 1, e, pool.unused);
   
   e.decision-level := current-level;
+  e.reasons := reasons;
   
   // push it into used
   push(pool.used, e);
@@ -342,6 +361,7 @@ define method select-next (pool :: <variable-pool>, current-level :: <integer>) 
   format-out("* used: ");
   print-list(pool.used); 
   format-out("\n");
+
   format-out("* sorted: ");
   print-list(pool.unused); 
   format-out("\n");
@@ -354,17 +374,18 @@ define method select-next (pool :: <variable-pool>, current-level :: <integer>) 
 	 current-level,
 	 pool.unused[0].decision-level);
   
-  let element = pop(pool.unused);
+  let e = pop(pool.unused);
   
-  assert(element.decision-level = -1, "select-next: decision-level of head should be -1 (is %=)\n", element.decision-level);
+  assert(e.decision-level = -1, "select-next: decision-level of head should be -1 (is %=)\n", e.decision-level);
   
-  element.decision-level := current-level;
+  e.decision-level := current-level;
+  e.reasons := make(<stretchy-vector>);
   
-  push(pool.used, element);
+  push(pool.used, e);
 
-  format-out("* next %=\n", element); force-out();
+  format-out("* next %=\n", e); force-out();
   
-  element.variable;
+  e.variable;
 end;
 
 define method undo-level (pool :: <variable-pool>, current-level :: <integer>, assignments :: <table>, state :: <array>) => (new-head :: <integer>)
@@ -377,7 +398,7 @@ define method undo-level (pool :: <variable-pool>, current-level :: <integer>, a
   // * remove all assignments on all assigned-vars-on-this-level
   // * set state to 0 on all assigned-vars-on-this-level
 
-   while(size(pool.used) > 0 & pool.used[0].decision-level = current-level)
+  while(size(pool.used) > 0 & pool.used[0].decision-level = current-level)
     done-something := #t;
     
     let element = pop(pool.used);   
@@ -385,6 +406,7 @@ define method undo-level (pool :: <variable-pool>, current-level :: <integer>, a
     remove-key!(assignments, v);
     state[v] := 0;
     element.decision-level := -1;
+    element.reasons := #f;
     push(pool.unused, element);
   end;  
   
@@ -427,7 +449,7 @@ end;
  * 0-indexed and literals are given by (var-index * 2); to negate, add 1
  */
 define method add-clause (s :: <sat-solver-it>, cnf :: <collection>) => ();
-  format-out("* add clause\n");
+  //format-out("* add clause\n");
   let c = make(<clause-it>);
   for(cnf-var in cnf) 
     let i = cnf-var;
@@ -445,7 +467,7 @@ define method add-clause (s :: <sat-solver-it>, cnf :: <collection>) => ();
       i := i + 1;
     end if;
     
-    format-out("** adding cnf-var %= as %=\n", cnf-var, i);
+    //format-out("** adding cnf-var %= as %=\n", cnf-var, i);
     add!(c.lits, i);
   end for;
   add!(s.clauses, c);
@@ -556,7 +578,8 @@ define function unit-propagation (o :: <sat-solver-it>,
 				  assignments :: <table>, 
 				  state :: <array>,
 				  watchlist :: <array>,
-				  dh :: <integer>) => (r :: <boolean>)
+				  dh :: <integer>,
+				  main-var :: <integer>) => (r :: <boolean>)
   let d :: <integer> = -1;
     
   // unit propagation
@@ -565,7 +588,7 @@ define function unit-propagation (o :: <sat-solver-it>,
     let i = 0;
     while (i < size(o.clauses))
       let clause = o.clauses[i];
-      let (assigned, all-assigned-are-false?, frees) = free-lits(clause, assignments);
+      let (assigned, all-assigned-are-false?, setted, frees) = free-lits(clause, assignments);
       
       if (all-assigned-are-false?)
 	
@@ -596,8 +619,23 @@ define function unit-propagation (o :: <sat-solver-it>,
 	  print-list(map(lit-to-var, clause.lits));
 	  format-out(") has free: %=\n", v);
 	  force-out();
+
+	  let reasons = make(<stretchy-vector>);
+	  let tmp-reasons = make(<set>);
+	  tmp-reasons := add!(tmp-reasons, main-var);
+	  reasons := add!(reasons, main-var);
 	  
-	  d := select-var(v-pool, dh, v);
+	  // FIXME better way to avoid duplicates?
+	  // insert also setted
+	  for (lit in setted)
+	    let lv = lit-to-var(lit);
+	    if(~member?(lv, tmp-reasons))
+	      tmp-reasons := add!(tmp-reasons, lv);
+	      reasons := add!(reasons, lv);
+	    end;
+	  end;
+	  
+	  d := select-var(v-pool, dh, v, reasons);
 	  let a = logxor(1, negated?(l));
 	  
 	  state[d] := logior(state[d], ash(1, a));
@@ -741,7 +779,7 @@ define method solve (o :: <sat-solver-it>) => (r :: false-or(<table>),
 	      // FIXME care about watchlists?
 	      dh := dh + 1;
 	      
-	      no-conflict := unit-propagation(o, v-pool, assignments, state, watchlist, dh);
+	      no-conflict := unit-propagation(o, v-pool, assignments, state, watchlist, dh, d);
 	      
 	      if (~no-conflict)
 		dh := dh - 1;
@@ -816,5 +854,5 @@ end;
 // - sort variables by usage in the input problem (DONE)
 // - preprocessing: limited applications of resolution steps (STUDY)
 // - aggressive backtracking, ie, dont jump only 1 var at a time
-// - dynamic sort of variables (why?)
+// - dynamic sort of variables
 
